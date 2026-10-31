@@ -51,7 +51,10 @@ def test(app):
     reloaded = Config(app.config.path)
     check([p.id for p in reloaded.profiles] == [ubuntu.id, rpi.id],
           "saved profiles persisted with stable ids")
-    items = [a.text() for a in win.saved_menu.actions() if not a.isSeparator() and not a.menu()]
+    actions = win.saved_menu.actions()
+    # Connections come first; import and key setup follow a separator.
+    sep = next(i for i, a in enumerate(actions) if a.isSeparator())
+    items = [a.text() for a in actions[:sep]]
     check(len(items) == 2 and any("Raspberry Pi" in i for i in items),
           f"Saved Connections menu lists profiles {items}")
 

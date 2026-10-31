@@ -96,6 +96,7 @@ class TerminalPanel(QWidget):
     closeRequested = pyqtSignal(object)
     scpRequested = pyqtSignal(object)
     appearanceRequested = pyqtSignal(object)
+    keySetupRequested = pyqtSignal(object)
     focused = pyqtSignal(object)
     # (panel, QMenu): the window fills the Move menu just before it opens.
     moveMenuRequested = pyqtSignal(object, object)
@@ -330,6 +331,10 @@ class TerminalPanel(QWidget):
         paste.triggered.connect(self.paste)
         menu.addAction(copy)
         menu.addAction(paste)
+        if not self.profile.is_local:
+            menu.addSeparator()
+            menu.addAction("Set up key login…").triggered.connect(
+                lambda: self.keySetupRequested.emit(self))
         menu.exec(self.terminal.mapToGlobal(pos))
 
     def set_active(self, active):

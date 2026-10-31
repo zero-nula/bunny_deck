@@ -1,6 +1,7 @@
 """Bunny Deck main application and window (Qt6 / QTermWidget)."""
 
 import os
+import re
 import shlex
 import shutil
 import signal
@@ -14,9 +15,14 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import colorschemes, mainthread, sshmux
-from .config import KIND_LOCAL, Config, Profile, default_local_appearance, store_background
-from .dialogs import AddAIToolDialog, AddSSHDialog, AppearanceDialog
+from . import colorschemes, keysetup, mainthread, sshconfig, sshmux
+from .config import (
+    KIND_LOCAL, Config, Profile, default_local_appearance, store_background, validate_host,
+)
+from .dialogs import (
+    AddAIToolDialog, AddSSHDialog, AppearanceDialog, CredentialDialog, ImportSSHConfigDialog,
+    KeySetupDialog,
+)
 from .layout import ABOVE, BELOW, LEFT, RIGHT, HORIZONTAL_SPLIT, VERTICAL_SPLIT, SplitLayout
 from .terminal import TerminalPanel, local_shell
 
@@ -147,6 +153,77 @@ class MainWindow(QMainWindow):
             a.triggered.connect(lambda _=False, pid=profile.id: self._on_saved_activate(pid))
             a = self.remove_menu.addAction(label)
             a.triggered.connect(lambda _=False, pid=profile.id: self._on_saved_remove(pid))
+        self.saved_menu.addSeparator()
+        self.saved_menu.addAction("Import from ~/.ssh/config…").triggered.connect(
+            self.import_ssh_config)
+        keys = self.saved_menu.addMenu("Set up key login")
+        ssh_profiles = [p for p in self.config.profiles if not p.is_local]
+        keys.setEnabled(bool(ssh_profiles))
+        for profile in sorted(ssh_profiles, key=lambda p: p.name.lower()):
+            a = keys.addAction(f"{profile.name}    {profile.target}")
+            a.triggered.connect(lambda _=False, pid=profile.id: self._on_key_setup(pid))
+
+    def _on_key_setup(self, profile_id):
+        profile = self.config.get(profile_id)
+        if profile is not None:
+            self.setup_key_login(profile)
+
+    # ----- ~/.ssh/config and key login ------------------------------------
+
+    def import_ssh_config(self):
+        aliases = [a for a in sshconfig.host_aliases() if validate_host(a) is None]
+        if not aliases:
+            QMessageBox.information(self, "Import from ~/.ssh/config",
+                                    f"No hosts found in {sshconfig.config_path()}.")
+            return
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            entries = [(alias, sshconfig.resolve(alias)) for alias in aliases]
+        finally:
+            QApplication.restoreOverrideCursor()
+        saved = {p.host for p in self.config.profiles}
+        dlg = ImportSSHConfigDialog(self, entries, saved)
+        if dlg.exec():
+            for alias in dlg.selected():
+                # The alias as host: ssh keeps applying its ~/.ssh/config settings.
+                self.config.add(Profile(name=alias, host=alias))
+            self.rebuild_saved_menu()
+        dlg.deleteLater()
+
+    def setup_key_login(self, profile):
+        ks = keysetup.KeySetup(profile, self._ask_key_credentials, mainthread.call_soon)
+        existing = keysetup.fingerprint() if keysetup.key_exists() else None
+        aliases = sshconfig.host_aliases()
+        config_alias = None if profile.host in aliases else _suggest_alias(profile, aliases)
+        steps = {"key": ks.create_key, "install": ks.install_key, "verify": ks.verify}
+
+        def run_step(key, args, done):
+            keysetup.run_in_thread(lambda: steps[key](*args), done)
+
+        def add_config(alias):
+            backup = sshconfig.add_host(alias, profile.host, profile.user, profile.port,
+                                        keysetup.key_path())
+            note = f" (backup: {os.path.basename(backup)})" if backup else ""
+            return f"added “Host {alias}”{note}"
+
+        dlg = KeySetupDialog(self, profile, keysetup.key_path(), existing, config_alias,
+                             run_step, add_config)
+        try:
+            dlg.exec()
+        finally:
+            ks.close()
+            dlg.deleteLater()
+
+    def _ask_key_credentials(self, profile, prompt, kind, retry):
+        if kind == "confirm":
+            dlg = CredentialDialog(self, f"Verify host — {profile.name}", prompt, confirm=True)
+        else:
+            dlg = CredentialDialog(self, f"Key setup — {profile.name}", prompt,
+                                   secret=True, retry=retry)
+        try:
+            return dlg.ask()
+        finally:
+            dlg.deleteLater()
 
     def _on_saved_activate(self, profile_id):
         profile = self.config.get(profile_id)
@@ -257,6 +334,7 @@ class MainWindow(QMainWindow):
         panel = TerminalPanel(profile, argv=argv)
         panel.closeRequested.connect(self._on_close_requested)
         panel.appearanceRequested.connect(self._on_appearance_requested)
+        panel.keySetupRequested.connect(lambda p: self.setup_key_login(p.profile))
         panel.scpRequested.connect(self.open_file_manager)
         panel.focused.connect(self._on_panel_focused)
         panel.moveMenuRequested.connect(self._fill_move_menu)
@@ -506,6 +584,15 @@ def _dark_palette():
                  QPalette.ColorRole.WindowText):
         p.setColor(QPalette.ColorGroup.Disabled, role, QColor("#4b5058"))
     return p
+
+
+def _suggest_alias(profile, taken):
+    """A one-word name for ~/.ssh/config from the connection's name."""
+    base = re.sub(r"[^a-z0-9._-]+", "-", profile.name.lower()).strip("-.") or "server"
+    alias, n = base, 2
+    while alias in taken:
+        alias, n = f"{base}-{n}", n + 1
+    return alias
 
 
 def create_application(argv):

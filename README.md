@@ -12,6 +12,7 @@ KDE Plasma in mind and works on other desktops too.
 - **Saved connections**: name, host or `~/.ssh/config` alias, user and port. Any number of sessions per connection.
 - **Integrated SFTP file manager** for each session, with two panes: Local ↔ Remote and Remote ↔ Remote, with drag and drop.
 - **Your SSH setup just works**: keys, ssh-agent, `~/.ssh/config` and `known_hosts` are used exactly as on the command line, because Bunny Deck runs the system `ssh`. Passwords are asked when needed and never stored.
+- **Key login in a few clicks**: Bunny Deck can create an SSH key, add it to a server, check that it works and add the server to `~/.ssh/config` — and import the hosts you already have there.
 - **One connection per server**: terminals and the file manager share it, so you log in once, and further terminals and the file manager open instantly.
 - **AI menu**: your own list of command line AI assistants (for example `claude`, `codex` or `opencode`), each opened in its own terminal with one click.
 - **Backgrounds**: per connection colour, transparency and an optional background image. Local terminals come with the Bunny Deck badge.
@@ -93,6 +94,14 @@ Deck stops with a message asking you to run `./build-native.sh` again.
   The terminal opens immediately. If you tick *Save*, the profile goes into **Saved Connections**.
 - **Local terminal**: a shell on this computer.
 - **Saved Connections ▾**: opens a new terminal for the chosen profile. The same profile can have any number of sessions.
+  - **Import from ~/.ssh/config…** lists the hosts defined there (with the user, address and port OpenSSH resolves) and adds the ones you tick. They are saved under their `~/.ssh/config` name, so all settings there keep applying.
+  - **Set up key login ▸** (also in a terminal's right-click menu) switches a connection from passwords to an SSH key:
+    1. creates `~/.ssh/id_ed25519` if you have no key yet (with an optional passphrase), or uses the existing one;
+    2. adds the public key to the server's `~/.ssh/authorized_keys` (only once). With a terminal to that server open, no password is needed; otherwise it is asked once;
+    3. logs in with only the key to prove it works;
+    4. optionally adds a `Host` entry to `~/.ssh/config` (after a backup copy), so `ssh <name>` works in any terminal.
+
+    It never changes the server's SSH settings: password logins stay allowed until you turn them off yourself.
 - **AI ▾**: your own list of AI assistants. **Add…** asks for the command (for example `claude` or `opencode --continue`) and a name; **Remove** takes one off the list.
   Choosing one runs its command in a new local terminal, in your shell with `~/.bashrc` loaded; when it exits, the shell stays open.
 - **Vertical Split** puts terminals side by side. **Horizontal Split** stacks them top to bottom.

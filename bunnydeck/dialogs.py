@@ -1,4 +1,5 @@
-"""Qt dialogs: Add SSH, Add AI tool, terminal appearance, and the SSH credential prompt."""
+"""Qt dialogs: Add SSH, Add AI tool, import from ~/.ssh/config, key login
+setup, terminal appearance, and the SSH credential prompt."""
 
 import os
 import shlex
@@ -7,7 +8,8 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton, QSlider, QSpinBox, QVBoxLayout,
+    QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
+    QSlider, QSpinBox, QVBoxLayout,
 )
 
 from .config import (
@@ -320,3 +322,228 @@ class CredentialDialog(QDialog):
         answer = self.entry.text()
         self.entry.clear()
         return answer
+
+
+class ImportSSHConfigDialog(QDialog):
+    """Picks hosts from ~/.ssh/config to add to Saved Connections.
+    entries: [(alias, {"hostname", "user", "port"} or None)]."""
+
+    def __init__(self, parent, entries, saved_hosts):
+        super().__init__(parent)
+        self.setWindowTitle("Import from ~/.ssh/config")
+        self.setMinimumWidth(480)
+        self.list = QListWidget()
+        for alias, info in entries:
+            detail = ""
+            if info:
+                detail = info["hostname"]
+                if info.get("user"):
+                    detail = f"{info['user']}@{detail}"
+                if info.get("port", 22) != 22:
+                    detail += f":{info['port']}"
+            item = QListWidgetItem(f"{alias}    {detail}".rstrip())
+            item.setData(Qt.ItemDataRole.UserRole, alias)
+            if alias in saved_hosts:
+                item.setText(item.text() + "    (already saved)")
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                item.setCheckState(Qt.CheckState.Unchecked)
+            else:
+                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                item.setCheckState(Qt.CheckState.Checked)
+            self.list.addItem(item)
+
+        buttons = QDialogButtonBox()
+        buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        self.import_btn = buttons.addButton("Import", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.import_btn.setDefault(True)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        self.list.itemChanged.connect(self._update)
+
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel("Choose the hosts to add to Saved Connections:"))
+        v.addWidget(self.list, 1)
+        v.addWidget(_hint("Each connection uses the host's name from ~/.ssh/config, so its "
+                          "settings there (user, port, keys, jump hosts) keep applying."))
+        v.addWidget(buttons)
+        self._update()
+
+    def selected(self):
+        items = (self.list.item(i) for i in range(self.list.count()))
+        return [it.data(Qt.ItemDataRole.UserRole) for it in items
+                if it.checkState() == Qt.CheckState.Checked]
+
+    def _update(self, *_):
+        self.import_btn.setEnabled(bool(self.selected()))
+
+
+class KeySetupDialog(QDialog):
+    """Sets up SSH key login for a connection: create the key if needed,
+    authorize it on the server, verify it, and optionally add a Host entry
+    to ~/.ssh/config. run_step(name, args, done) runs one KeySetup step off
+    the UI thread and calls done(message, error) on it."""
+
+    STEPS = [("key", "Key"), ("install", "Add the key to the server"),
+             ("verify", "Log in with the key"), ("config", "Add to ~/.ssh/config")]
+
+    def __init__(self, parent, profile, key_path, existing_fingerprint, config_alias,
+                 run_step, add_config):
+        super().__init__(parent)
+        self.setWindowTitle(f"Set up key login — {profile.name}")
+        self.setMinimumWidth(560)
+        self.profile = profile
+        self.run_step = run_step
+        self.add_config = add_config
+        self.running = False
+        self.succeeded = False
+
+        v = QVBoxLayout(self)
+        v.addWidget(QLabel(f"Log in to <b>{profile.target}</b> with an SSH key instead of a "
+                           "password."))
+        home = os.path.expanduser("~")
+        shown = "~" + key_path[len(home):] if key_path.startswith(home + os.sep) else key_path
+
+        form = QFormLayout()
+        self.passphrase = self.passphrase2 = None
+        if existing_fingerprint is not None:
+            form.addRow("Key", QLabel(f"{shown} (exists, will be used)\n{existing_fingerprint}"))
+        else:
+            form.addRow("Key", QLabel(f"A new key will be created: {shown}"))
+            self.passphrase = QLineEdit(echoMode=QLineEdit.EchoMode.Password,
+                                        placeholderText="recommended")
+            self.passphrase2 = QLineEdit(echoMode=QLineEdit.EchoMode.Password)
+            form.addRow("Passphrase", self.passphrase)
+            form.addRow("Repeat", self.passphrase2)
+        v.addLayout(form)
+        if self.passphrase is not None:
+            v.addWidget(_hint("The passphrase protects the key file if someone copies it. "
+                              "Leave it empty for a key without one."))
+
+        self.config_box = QCheckBox("Also add a Host entry to ~/.ssh/config")
+        self.alias = QLineEdit(config_alias or "")
+        row = QHBoxLayout()
+        row.addWidget(self.config_box)
+        row.addWidget(self.alias, 1)
+        if config_alias is None:
+            self.config_box.setChecked(False)
+            self.config_box.setEnabled(False)
+            self.alias.hide()
+            self.config_box.setText(f"“{profile.host}” is already in ~/.ssh/config")
+        else:
+            self.config_box.setChecked(True)
+            self.config_box.toggled.connect(self.alias.setEnabled)
+        v.addLayout(row)
+        if config_alias is not None:
+            v.addWidget(_hint("Then “ssh <name>” also works in any terminal, with this key."))
+
+        steps = QGridLayout()
+        self.marks = {}
+        self.texts = {}
+        for i, (key, title) in enumerate(self.STEPS):
+            mark = QLabel("•")
+            mark.setFixedWidth(18)
+            text = QLabel(title)
+            text.setWordWrap(True)
+            steps.addWidget(mark, i, 0, Qt.AlignmentFlag.AlignTop)
+            steps.addWidget(text, i, 1)
+            self.marks[key], self.texts[key] = mark, text
+        v.addLayout(steps)
+
+        self.error = QLabel()
+        self.error.setObjectName("errorLabel")
+        self.error.setWordWrap(True)
+        self.error.hide()
+        v.addWidget(self.error)
+        self.result = _hint("")
+        self.result.hide()
+        v.addWidget(self.result)
+
+        buttons = QDialogButtonBox()
+        self.close_btn = buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        self.start_btn = buttons.addButton("Set up", QDialogButtonBox.ButtonRole.AcceptRole)
+        self.start_btn.setDefault(True)
+        self.start_btn.clicked.connect(self.start)
+        self.close_btn.clicked.connect(self.reject)
+        v.addWidget(buttons)
+
+    def _mark(self, key, mark, text=None):
+        self.marks[key].setText(mark)
+        title = dict(self.STEPS)[key]
+        self.texts[key].setText(f"{title}: {text}" if text else title)
+        self.adjustSize()  # longer, wrapped step texts need more height
+
+    def _fail(self, key, message):
+        self._mark(key, "✗")
+        self.error.setText(message)
+        self.error.show()
+        self.running = False
+        self.start_btn.setText("Try again")
+        self.start_btn.setEnabled(True)
+        self.close_btn.setEnabled(True)
+
+    def start(self):
+        if self.running:
+            return
+        passphrase = ""
+        if self.passphrase is not None:
+            passphrase = self.passphrase.text()
+            if passphrase != self.passphrase2.text():
+                self.error.setText("The passphrases do not match.")
+                self.error.show()
+                return
+        if self.config_box.isChecked():
+            from .sshconfig import valid_alias
+            if not valid_alias(self.alias.text().strip()):
+                self.error.setText("The name for ~/.ssh/config must be one word without "
+                                   "spaces, * or ?.")
+                self.error.show()
+                return
+        self.error.hide()
+        self.running = True
+        self.start_btn.setEnabled(False)
+        self.close_btn.setEnabled(False)
+        for key, _ in self.STEPS:
+            self._mark(key, "•")
+        self._step("key", passphrase)
+
+    def _step(self, key, *args):
+        self._mark(key, "…")
+        order = [k for k, _ in self.STEPS]
+
+        def done(message, error):
+            if error is not None:
+                self._fail(key, error)
+                return
+            self._mark(key, "✓", message)
+            nxt = order[order.index(key) + 1]
+            if nxt == "config":
+                self._finish_config()
+            else:
+                self._step(nxt)
+
+        self.run_step(key, args, done)
+
+    def _finish_config(self):
+        if self.config_box.isChecked():
+            try:
+                message = self.add_config(self.alias.text().strip())
+            except (OSError, ValueError) as e:
+                self._fail("config", str(e))
+                return
+            self._mark("config", "✓", message)
+        else:
+            self._mark("config", "–", "skipped")
+        self.running = False
+        self.succeeded = True
+        self.result.setText(f"Done: {self.profile.name} now logs in with your key. The server "
+                            "still accepts passwords too; you can turn them off in its sshd "
+                            "settings once key login works from all your devices.")
+        self.result.show()
+        self.start_btn.hide()
+        self.close_btn.setText("Close")
+        self.close_btn.setEnabled(True)
+        self.adjustSize()
+
+    def reject(self):
+        if not self.running:
+            super().reject()

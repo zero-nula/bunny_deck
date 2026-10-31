@@ -41,7 +41,9 @@ class ThrowawaySSHD:
         user = getpass.getuser()
         with open(f"{t}/sshd_config", "w") as f:
             f.write(f"Port {self.port}\nListenAddress 127.0.0.1\nHostKey {t}/host_key\n"
-                    f"PidFile {t}/sshd.pid\nAuthorizedKeysFile {t}/authorized_keys\n"
+                    f"PidFile {t}/sshd.pid\n"
+                    # remote_ssh/: where tests install keys instead of the real ~/.ssh
+                    f"AuthorizedKeysFile {t}/authorized_keys {t}/remote_ssh/authorized_keys\n"
                     "StrictModes no\nUsePAM no\nPasswordAuthentication no\n"
                     "KbdInteractiveAuthentication no\nPubkeyAuthentication yes\n"
                     f"AllowUsers {user}\nSubsystem sftp {SFTP_SERVER}\n")

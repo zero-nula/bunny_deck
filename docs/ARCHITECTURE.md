@@ -40,6 +40,8 @@ bunnydeck/askpass.py       in-app SSH_ASKPASS endpoint (private Unix socket)
 bunnydeck/askpass_helper.py   helper executed by ssh; forwards prompts to the app
 bunnydeck/connections.py   SFTP connection pool (UI hooks passed in)
 bunnydeck/sshmux.py        one shared SSH connection per host (OpenSSH ControlMaster)
+bunnydeck/sshconfig.py     reads hosts from ~/.ssh/config (ssh -G), appends Host entries
+bunnydeck/keysetup.py      key login setup: create key, authorize it, verify
 bunnydeck/transfer.py      Local/Remote backends and the copy engine
 tests/                     unit tests and GUI tests on Xvfb (run_all.sh)
 ```
@@ -151,6 +153,34 @@ The sockets live in a private `0700` directory
 master is closed with `ssh -O exit` and the directory is removed. Options
 given on the command line take precedence over `ControlMaster` settings in
 `~/.ssh/config`.
+
+## ~/.ssh/config import and key login
+
+`sshconfig.py` collects the concrete `Host` aliases of `~/.ssh/config`
+(following `Include`, skipping patterns and negations) and asks OpenSSH what
+each one means with `ssh -G alias`, so defaults and `Match` rules apply as on
+the command line. Imported connections use the alias as host name, which
+keeps every setting of `~/.ssh/config` in effect. Writing only appends a
+`# Added by Bunny Deck` `Host` block after copying the file to
+`config.bunny-deck-<time>.bak`; `~/.ssh` and a new file get `0700`/`0600`.
+
+`keysetup.py` runs the key login steps in a worker thread:
+
+1. **Key:** `~/.ssh/id_ed25519` is used if it exists and never overwritten;
+   otherwise `ssh-keygen -t ed25519` creates it. OpenSSH tries this file by
+   default, so no configuration is needed to use it.
+2. **Authorize:** one `ssh host 'exec sh -c …'` reads the public key from
+   stdin and appends it to `~/.ssh/authorized_keys` unless that exact line is
+   already there (`umask 077`, `restorecon` where available). It uses the
+   terminal's shared connection if there is one, so no password is needed.
+3. **Verify:** `ssh -o ControlPath=none -o PreferredAuthentications=publickey
+   -o PasswordAuthentication=no -o IdentitiesOnly=yes -i <key> host true`
+   proves the key alone logs in.
+
+As everywhere else, secrets never reach a command line: the new key's
+passphrase is given to `ssh-keygen` and server passwords to `ssh` through
+`SSH_ASKPASS` (`askpass.py`). The server's sshd configuration is never
+changed.
 
 ## File manager and SFTP
 
