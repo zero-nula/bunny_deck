@@ -98,6 +98,16 @@ the `TerminalDisplay`.
   QTermWidget does not report the exit code, so the header shows
   "disconnected" for both a closed and a failed connection.
 
+### Broadcast
+
+With Broadcast on, the key filter on each `TerminalDisplay` replays every
+key press of a ticked terminal as a new `QKeyEvent` into the displays of the
+other ticked terminals (`TerminalPanel.forward_key`), so letters, Enter,
+arrows and Ctrl combinations behave exactly as typed there. A module flag
+keeps replayed keys from being broadcast again. Pastes (keyboard, menu,
+middle click) are repeated with `pasteClipboard` / `pasteSelection`. Copy
+and Ctrl+Shift+B are never broadcast. The state is never saved.
+
 ### Layout and resizing
 
 The layout (`layout.py`) is a tree of nested `QSplitter`s. Moving a terminal

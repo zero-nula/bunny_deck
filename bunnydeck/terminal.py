@@ -10,8 +10,11 @@ import os
 import signal
 
 from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QFont, QKeySequence
-from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget
+from PyQt6.QtGui import QAction, QFont, QKeyEvent, QKeySequence
+from PyQt6.QtWidgets import (
+    QApplication, QCheckBox, QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QVBoxLayout,
+    QWidget,
+)
 
 from . import background, colorschemes, sshmux
 from .config import Appearance
@@ -22,6 +25,10 @@ FONT_SIZE = 10.5
 SCROLLBACK_LINES = 10000
 SSH_BINARY = "/usr/bin/ssh"
 FALLBACK_SHELL = "/bin/bash"
+
+# True while keys typed in one terminal are being replayed into the others
+# (broadcast), so the replayed keys are not broadcast again.
+_forwarding = False
 
 
 def local_shell():
@@ -52,7 +59,8 @@ def _process_alive(pid):
 
 
 class _ClipboardKeys(QObject):
-    """Ctrl+Shift+C / Ctrl+Shift+V / Shift+Insert for the terminal display.
+    """Ctrl+Shift+C / Ctrl+Shift+V / Shift+Insert / Ctrl+Shift+B for the
+    terminal display, and broadcasting of everything else typed.
 
     Konsole's TerminalDisplay claims every key (also as ShortcutOverride),
     so QShortcut never sees these; they are intercepted on the display."""
@@ -73,6 +81,8 @@ class _ClipboardKeys(QObject):
             return self.panel.paste
         if mods == Qt.KeyboardModifier.ShiftModifier and event.key() == Qt.Key.Key_Insert:
             return self.panel.paste
+        if mods == ctrl_shift and event.key() == Qt.Key.Key_B:
+            return self.panel.broadcastToggleRequested.emit
         return None
 
     def eventFilter(self, obj, event):
@@ -85,6 +95,11 @@ class _ClipboardKeys(QObject):
             if action is not None:
                 action()
                 return True
+            self.panel.forward_key(event)
+        if (t == QEvent.Type.MouseButtonPress
+                and event.button() == Qt.MouseButton.MiddleButton):
+            for p in self.panel.broadcast_peers():
+                p.terminal.pasteSelection()
         if t == QEvent.Type.FocusIn:
             self.panel.focused.emit(self.panel)
         return False
@@ -97,6 +112,8 @@ class TerminalPanel(QWidget):
     scpRequested = pyqtSignal(object)
     appearanceRequested = pyqtSignal(object)
     keySetupRequested = pyqtSignal(object)
+    broadcastToggleRequested = pyqtSignal()
+    broadcastChanged = pyqtSignal(object)
     focused = pyqtSignal(object)
     # (panel, QMenu): the window fills the Move menu just before it opens.
     moveMenuRequested = pyqtSignal(object, object)
@@ -112,6 +129,10 @@ class TerminalPanel(QWidget):
         self.child_pid = None
         self.running = False
         self._bg_file = ""
+        self.broadcast = False
+        # Set by the window: the other terminals that receive what is typed
+        # here while broadcasting (empty otherwise).
+        self.broadcast_peers = lambda: []
         self.setObjectName("termPanel")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
@@ -126,7 +147,7 @@ class TerminalPanel(QWidget):
     # ----- UI -------------------------------------------------------------
 
     def _build_header(self):
-        header = QWidget(self)
+        header = self.header = QWidget(self)
         header.setObjectName("termHeader")
         header.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         h = QHBoxLayout(header)
@@ -147,6 +168,13 @@ class TerminalPanel(QWidget):
         for lbl in (self.name_label, self.status_label):
             lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
 
+        self.broadcast_box = QCheckBox(header)
+        self.broadcast_box.setObjectName("broadcastBox")
+        self.broadcast_box.setToolTip("Broadcast: what you type goes to every ticked terminal")
+        self.broadcast_box.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.broadcast_box.toggled.connect(self.set_broadcast)
+        self.broadcast_box.hide()
+        h.addWidget(self.broadcast_box)
         h.addWidget(self.status_dot)
         h.addWidget(self.name_label)
         h.addWidget(self.target_label, 1)
@@ -319,6 +347,45 @@ class TerminalPanel(QWidget):
 
     def paste(self):
         self.terminal.pasteClipboard()
+        for p in self.broadcast_peers():
+            p.terminal.pasteClipboard()
+
+    # ----- broadcast ------------------------------------------------------
+
+    def set_broadcast_mode(self, on, include=False):
+        """Shows or hides the broadcast tick box; include ticks it."""
+        self.broadcast_box.setVisible(on)
+        self.broadcast_box.setChecked(on and include)
+
+    def set_broadcast(self, on):
+        if on == self.broadcast:
+            return
+        self.broadcast = on
+        if self.broadcast_box.isChecked() != on:
+            self.broadcast_box.setChecked(on)
+        self.setProperty("broadcast", on)
+        # The header's look depends on this property of its parent too.
+        for w in (self, self.header):
+            w.style().unpolish(w)
+            w.style().polish(w)
+        self.broadcastChanged.emit(self)
+
+    def forward_key(self, event):
+        """Replays a key typed here into the other broadcast terminals."""
+        global _forwarding
+        if _forwarding:
+            return
+        peers = self.broadcast_peers()
+        if not peers:
+            return
+        _forwarding = True
+        try:
+            for p in peers:
+                QApplication.sendEvent(p.display, QKeyEvent(
+                    event.type(), event.key(), event.modifiers(), event.text(),
+                    event.isAutoRepeat(), event.count()))
+        finally:
+            _forwarding = False
 
     def _context_menu(self, pos):
         menu = QMenu(self)

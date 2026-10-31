@@ -9,7 +9,7 @@ import sys
 
 from PyQt6.QtCore import QObject, Qt, QTimer, pyqtClassInfo, pyqtSlot
 from PyQt6.QtDBus import QDBusAbstractAdaptor, QDBusConnection, QDBusInterface
-from PyQt6.QtGui import QColor, QIcon, QPalette
+from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWidgets import (
     QApplication, QButtonGroup, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
     QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
@@ -44,6 +44,8 @@ class MainWindow(QMainWindow):
         # change applies to every open local terminal (like an SSH profile).
         self.local_profile = Profile(name="Local", host="", kind=KIND_LOCAL,
                                      appearance=config.local_appearance)
+        # Broadcast: typing goes to every ticked terminal. Never remembered.
+        self.broadcasting = False
         # Likewise one unsaved local profile per AI tool (keyed by tool id).
         self.ai_profiles = {}
         self.setWindowTitle(APP_NAME)
@@ -109,6 +111,17 @@ class MainWindow(QMainWindow):
         self.ai_button.setMenu(self.ai_menu)
         self.rebuild_ai_menu()
         h.addWidget(self.ai_button)
+
+        self.broadcast_btn = QPushButton("⇉ Broadcast")
+        self.broadcast_btn.setObjectName("broadcastBtn")
+        self.broadcast_btn.setCheckable(True)
+        self.broadcast_btn.setToolTip("Type into several terminals at once (Ctrl+Shift+B)")
+        # May shrink (clipping its text) so the window stays narrow.
+        self.broadcast_btn.setMinimumWidth(30)
+        self.broadcast_btn.toggled.connect(self.set_broadcast_mode)
+        h.addWidget(self.broadcast_btn)
+        # Outside a terminal; inside one, the terminal's key filter handles it.
+        QShortcut(QKeySequence("Ctrl+Shift+B"), self, activated=self.broadcast_btn.toggle)
 
         h.addStretch(1)
         self.vsplit_btn = QPushButton("Vertical Split")
@@ -335,6 +348,11 @@ class MainWindow(QMainWindow):
         panel.closeRequested.connect(self._on_close_requested)
         panel.appearanceRequested.connect(self._on_appearance_requested)
         panel.keySetupRequested.connect(lambda p: self.setup_key_login(p.profile))
+        panel.broadcastToggleRequested.connect(self.broadcast_btn.toggle)
+        panel.broadcastChanged.connect(self._update_broadcast_button)
+        panel.broadcast_peers = lambda p=panel: self._broadcast_peers(p)
+        if self.broadcasting:
+            panel.set_broadcast_mode(True, include=False)  # joins only when ticked
         panel.scpRequested.connect(self.open_file_manager)
         panel.focused.connect(self._on_panel_focused)
         panel.moveMenuRequested.connect(self._fill_move_menu)
@@ -350,7 +368,29 @@ class MainWindow(QMainWindow):
         self._on_panel_focused(panel)
         return panel
 
+    # ----- broadcast ------------------------------------------------------
+
+    def set_broadcast_mode(self, on):
+        """Turns broadcast on (all SSH terminals ticked; local ones not, so
+        server commands never run here by accident) or off."""
+        self.broadcasting = on
+        if self.broadcast_btn.isChecked() != on:
+            self.broadcast_btn.setChecked(on)
+        for p in self.layout_.panels:
+            p.set_broadcast_mode(on, include=not p.profile.is_local)
+        self._update_broadcast_button()
+
+    def _broadcast_peers(self, panel):
+        if not self.broadcasting or not panel.broadcast:
+            return []
+        return [p for p in self.layout_.panels if p is not panel and p.broadcast]
+
+    def _update_broadcast_button(self, *_):
+        n = sum(1 for p in self.layout_.panels if p.broadcast) if self.broadcasting else 0
+        self.broadcast_btn.setText(f"⇉ Broadcast: {n}" if self.broadcasting else "⇉ Broadcast")
+
     def close_panel(self, panel):
+        panel.set_broadcast(False)
         panel.terminate()
         self.layout_.remove_panel(panel)
         panel.deleteLater()

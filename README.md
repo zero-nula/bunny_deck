@@ -10,6 +10,7 @@ KDE Plasma in mind and works on other desktops too.
 
 - **Real terminals** (QTermWidget, the terminal widget of QTerminal) in one window, side by side or stacked, with draggable dividers and free arrangement (for example one large terminal with two stacked beside it).
 - **Saved connections**: name, host or `~/.ssh/config` alias, user and port. Any number of sessions per connection.
+- **Broadcast**: type a command once and run it in several terminals at the same time, for example an update on five servers.
 - **Integrated SFTP file manager** for each session, with two panes: Local ↔ Remote and Remote ↔ Remote, with drag and drop.
 - **Your SSH setup just works**: keys, ssh-agent, `~/.ssh/config` and `known_hosts` are used exactly as on the command line, because Bunny Deck runs the system `ssh`. Passwords are asked when needed and never stored.
 - **Key login in a few clicks**: Bunny Deck can create an SSH key, add it to a server, check that it works and add the server to `~/.ssh/config` — and import the hosts you already have there.
@@ -104,6 +105,9 @@ Deck stops with a message asking you to run `./build-native.sh` again.
     It never changes the server's SSH settings: password logins stay allowed until you turn them off yourself.
 - **AI ▾**: your own list of AI assistants. **Add…** asks for the command (for example `claude` or `opencode --continue`) and a name; **Remove** takes one off the list.
   Choosing one runs its command in a new local terminal, in your shell with `~/.bashrc` loaded; when it exits, the shell stays open.
+- **⇉ Broadcast** (or Ctrl+Shift+B): each terminal gets a tick box. What you type in a ticked terminal — keys, Enter, Ctrl+C, pastes — goes to every ticked terminal.
+  SSH terminals are ticked when you turn it on, local terminals and terminals opened later are not. Ticked terminals have an orange frame, and the button shows how many there are.
+  Broadcast is always off when Bunny Deck starts.
 - **Vertical Split** puts terminals side by side. **Horizontal Split** stacks them top to bottom.
   You can drag the dividers. Adding or closing a terminal re-balances the layout.
 - **Remove Connection** (top right): pick a saved profile and confirm to remove it. Open sessions keep running.

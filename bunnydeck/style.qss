@@ -176,3 +176,18 @@ QSplitter::handle:hover {
 #fmStatusbar QLabel {
     color: #6b7280;
 }
+
+/* Broadcast: ticked terminals and the toolbar button turn orange. */
+#termPanel[broadcast="true"], #termPanel[broadcast="true"][active="true"] {
+    border-color: #e8913a;
+}
+
+#termPanel[broadcast="true"] #termHeader {
+    background-color: #2a1d10;
+}
+
+#deckToolbar QPushButton#broadcastBtn:checked {
+    border-color: #e8913a;
+    background-color: #2a1d10;
+    color: #ffffff;
+}
