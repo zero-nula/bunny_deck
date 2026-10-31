@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Bunny Deck application icon: a deck of terminal cards. The front card
+     has bunny ears (one floppy), a prompt and a cotton tail. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- back card -->
+  <rect x="32" y="32" width="88" height="66" rx="11" fill="#2a2d33" stroke="#9aa0a8" stroke-width="4"/>
+  <!-- ears, behind the front card: left upright, right folded over -->
+  <g fill="#d8dce2" stroke="#e8eaed" stroke-width="4.5" stroke-linejoin="round">
+    <ellipse cx="0" cy="0" rx="11" ry="26" transform="translate(34 32) rotate(-12)"/>
+    <path d="M60 56 C58 38 60 22 70 15 C79 9 93 12 102 22 C107 28 102 35 95 31
+             C89 27 83 26 80 32 C77 39 78 47 80 56 Z"/>
+  </g>
+  <ellipse cx="0" cy="0" rx="4.8" ry="17" fill="#f2a7b8" transform="translate(34 34) rotate(-12)"/>
+  <path d="M66 52 C65 38 66 26 72 21 C78 17 87 18 93 23 C88 21 82 21 77 25 C72 31 71 41 72 52 Z"
+        fill="#f2a7b8"/>
+  <!-- front card -->
+  <rect x="8" y="48" width="98" height="70" rx="12" fill="#15171b" stroke="#e8eaed" stroke-width="5"/>
+  <!-- prompt: chevron + cursor -->
+  <path d="M27 71 L41 82 L27 93" fill="none" stroke="#8fc970" stroke-width="7.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="50" y="89" width="28" height="7.5" rx="3.75" fill="#e8eaed"/>
+  <!-- cotton tail -->
+  <g fill="#c8ccd2">
+    <circle cx="104" cy="111" r="12"/><circle cx="113" cy="104" r="8.5"/>
+    <circle cx="115" cy="116" r="8.5"/><circle cx="101" cy="121" r="7.5"/>
+  </g>
+  <g fill="#f8f9fa">
+    <circle cx="104" cy="111" r="9.5"/><circle cx="113" cy="104" r="6"/>
+    <circle cx="115" cy="116" r="6"/><circle cx="101" cy="121" r="5"/>
+  </g>
+</svg>

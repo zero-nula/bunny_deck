@@ -1,0 +1,43 @@
+# Builds Bunny Deck and runs the whole test suite (unit tests and GUI tests on
+# Xvfb) on every supported distribution, using install-deps.sh like a user.
+
+stages:
+  - test
+
+.test:
+  stage: test
+  script:
+    - ./install-deps.sh --tests
+    - ./build-native.sh
+    # The tests run an unprivileged sshd, so they must not run as root.
+    - useradd -m tester
+    - chown -R tester "$CI_PROJECT_DIR"
+    - install -d -m 700 -o tester /tmp/runtime-tester
+    - runuser -u tester -- env HOME=/home/tester XDG_RUNTIME_DIR=/tmp/runtime-tester
+        dbus-run-session -- tests/run_all.sh
+
+opensuse-tumbleweed:
+  extends: .test
+  image: opensuse/tumbleweed
+  before_script:
+    - zypper --non-interactive install shadow util-linux
+
+fedora-43:
+  extends: .test
+  image: fedora:43
+  before_script:
+    - dnf install -y shadow-utils util-linux
+
+archlinux:
+  extends: .test
+  image: archlinux:latest
+  before_script:
+    - pacman -Syu --noconfirm shadow util-linux
+
+debian-13:
+  extends: .test
+  image: debian:trixie
+
+ubuntu-26.04:
+  extends: .test
+  image: ubuntu:26.04

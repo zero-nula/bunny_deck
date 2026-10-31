@@ -1,0 +1,28 @@
+# Minimal PyQt6 binding for the system QTermWidget (libqtermwidget6), for
+# which distributions ship no Python bindings. Only the API Bunny Deck uses is
+# declared (sip/qtermwidget/qtermwidgetmod.sip). Build with ../build-native.sh,
+# which fills in the @...@ paths for this system.
+[build-system]
+requires = ["sip >=6.7, <7", "PyQt-builder >=1.15, <2"]
+build-backend = "pyqtbuild.project"
+
+[project]
+name = "bunnydeck-qtermwidget"
+version = "1.0"
+
+[tool.sip]
+project-factory = "pyqtbuild:PyQtProject"
+
+[tool.sip.project]
+sip-files-dir = "sip"
+# PyQt6's .sip files; pyqt-builder does not always find them by itself
+sip-include-dirs = ["@PYQT6_SIP_DIR@"]
+abi-version = "13"
+dunder-init = false
+
+[tool.sip.bindings.qtermwidget]
+headers = ["qtermwidget.h"]
+include-dirs = ["@QTERMWIDGET_INCLUDE_DIR@"]
+libraries = ["qtermwidget6"]
+qmake-QT = ["widgets"]
+pep484-pyi = false

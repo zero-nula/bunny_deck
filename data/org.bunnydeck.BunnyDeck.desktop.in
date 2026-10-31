@@ -1,0 +1,14 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Bunny Deck
+GenericName=SSH & SFTP Manager
+Comment=Native SSH terminals with split views and an integrated SFTP file manager
+Exec=@EXEC@
+Icon=bunny-deck
+Terminal=false
+Categories=Network;RemoteAccess;Qt;
+Keywords=ssh;sftp;scp;terminal;remote;
+StartupNotify=true
+StartupWMClass=org.bunnydeck.BunnyDeck
+SingleMainWindow=true

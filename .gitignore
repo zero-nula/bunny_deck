@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+# built locally by build-native.sh against the installed QTermWidget/PyQt6
+bunnydeck/qtermwidget*.so
+native/build/

@@ -1,0 +1,178 @@
+/* Bunny Deck — minimalist dark theme (Qt style sheet).
+ * The main window is translucent so a terminal's background alpha can show
+ * the desktop; every non-terminal surface paints its own solid background. */
+
+QWidget {
+    color: #c9ced6;
+}
+
+QDialog, QMenu, QToolTip, QMessageBox {
+    background-color: #121418;
+    color: #c9ced6;
+}
+
+QToolTip {
+    border: 1px solid #1f232a;
+}
+
+#deckToolbar {
+    background-color: #0a0b0d;
+    border-bottom: 1px solid #1f232a;
+}
+
+#deckToolbar QPushButton, #deckToolbar QToolButton {
+    min-height: 22px;
+    padding: 2px 10px;
+    border-radius: 4px;
+    border: 1px solid #1f232a;
+    background-color: #121418;
+    color: #c9ced6;
+}
+
+#deckToolbar QPushButton:hover, #deckToolbar QToolButton:hover {
+    background-color: #1a1d23;
+}
+
+#deckToolbar QPushButton:checked {
+    border-color: #5b8def;
+    color: #ffffff;
+}
+
+#deckToolbar QToolButton::menu-indicator {
+    image: none;
+}
+
+#emptyState, #fmRoot, QStackedWidget > QWidget#fmRoot {
+    background-color: #0a0b0d;
+}
+
+#emptyTitle {
+    font-size: 15px;
+    color: #c9ced6;
+}
+
+#dimLabel {
+    color: #6b7280;
+}
+
+#errorLabel {
+    color: #e0605d;
+    padding: 4px 8px;
+}
+
+/* Divider between panels. */
+QSplitter::handle {
+    background-color: #1f232a;
+}
+
+QSplitter::handle:hover {
+    background-color: #5b8def;
+}
+
+#termPanel {
+    background-color: transparent;
+    border: 1px solid #1f232a;
+}
+
+#termPanel[active="true"] {
+    border-color: #2c3a55;
+}
+
+#termHeader {
+    background-color: #121418;
+    border-bottom: 1px solid #1f232a;
+    min-height: 20px;
+    max-height: 20px;
+}
+
+#termHeader QLabel {
+    font-size: 11px;
+    color: #6b7280;
+}
+
+#termHeader QLabel#termName {
+    color: #c9ced6;
+    font-weight: bold;
+}
+
+#statusDot {
+    font-size: 9px;
+}
+
+#statusDot[state="ok"] { color: #6cc070; }
+#statusDot[state="error"] { color: #e0605d; }
+#statusDot[state="connecting"] { color: #e5c07b; }
+#statusDot[state="off"] { color: #6b7280; }
+
+#termHeader QToolButton {
+    font-size: 11px;
+    color: #6b7280;
+    border: none;
+    padding: 0 6px;
+    min-height: 16px;
+    background: transparent;
+}
+
+#termHeader QToolButton::menu-indicator {
+    image: none;
+}
+
+#termHeader QToolButton:hover {
+    color: #c9ced6;
+    background-color: #1f232a;
+}
+
+#termHeader QToolButton#hdrClose:hover {
+    color: #ffffff;
+    background-color: #8a2d2b;
+}
+
+/* Thin terminal scrollbar. */
+#termPanel QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+    margin: 0;
+    border: none;
+}
+
+#termPanel QScrollBar::handle:vertical {
+    background: rgba(200, 205, 214, 0.35);
+    min-height: 24px;
+    border-radius: 3px;
+    margin: 1px 2px;
+}
+
+#termPanel QScrollBar::handle:vertical:hover {
+    background: rgba(200, 205, 214, 0.7);
+}
+
+#termPanel QScrollBar::add-line, #termPanel QScrollBar::sub-line,
+#termPanel QScrollBar::add-page, #termPanel QScrollBar::sub-page {
+    height: 0;
+    background: transparent;
+}
+
+/* File manager */
+#fmPane {
+    background-color: #0a0b0d;
+    border: 1px solid #1f232a;
+}
+
+#fmHeader, #fmStatusbar {
+    background-color: #121418;
+}
+
+#fmPane QTreeWidget {
+    background-color: #0a0b0d;
+    alternate-background-color: #0d0f12;
+    border: none;
+}
+
+#fmPane QTreeWidget::item:selected {
+    background-color: #24324d;
+    color: #ffffff;
+}
+
+#fmStatusbar QLabel {
+    color: #6b7280;
+}
