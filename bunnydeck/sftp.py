@@ -20,6 +20,8 @@ import struct
 import subprocess
 import threading
 
+from . import sshmux
+
 SSH_BINARY = "/usr/bin/ssh"
 
 # packet types
@@ -178,7 +180,9 @@ class _Future:
 
 def ssh_sftp_argv(profile, extra_opts=()):
     """`ssh ... -s host sftp` with options that keep the session a pure,
-    non-interactive data channel while honouring the user's ssh config."""
+    non-interactive data channel while honouring the user's ssh config.
+    It runs over a terminal's connection to the host if there is one, but
+    never becomes a shared connection itself (see sshmux.py)."""
     opts = [
         "-x", "-a", "-T",
         "-o", "BatchMode=no",
@@ -187,6 +191,7 @@ def ssh_sftp_argv(profile, extra_opts=()):
         "-o", "RemoteCommand=none",
         "-o", "RequestTTY=no",
         "-o", "ControlMaster=no",
+        *sshmux.client_opts(),
         "-o", "ConnectTimeout=20",
         "-o", "ServerAliveInterval=20",
     ]

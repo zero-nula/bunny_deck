@@ -12,6 +12,7 @@ KDE Plasma in mind and works on other desktops too.
 - **Saved connections**: name, host or `~/.ssh/config` alias, user and port. Any number of sessions per connection.
 - **Integrated SFTP file manager** for each session, with two panes: Local ↔ Remote and Remote ↔ Remote, with drag and drop.
 - **Your SSH setup just works**: keys, ssh-agent, `~/.ssh/config` and `known_hosts` are used exactly as on the command line, because Bunny Deck runs the system `ssh`. Passwords are asked when needed and never stored.
+- **One connection per server**: terminals and the file manager share it, so you log in once, and further terminals and the file manager open instantly.
 - **AI menu**: your own list of command line AI assistants (for example `claude`, `codex` or `opencode`), each opened in its own terminal with one click.
 - **Backgrounds**: per connection colour, transparency and an optional background image. Local terminals come with the Bunny Deck badge.
 
@@ -123,7 +124,7 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ## Known limitations
 
 - Folder transfers, synchronisation and transfer queues are not implemented.
-- The terminal and the file manager use separate SSH connections, so a password-only server asks for the password twice.
+- The shared connection is started by a terminal. If you open the file manager for a server without a terminal to it, it connects (and asks for a password) on its own.
 - The terminal header cannot tell a failed connection from a closed one (QTermWidget does not report the exit code).
 - Window transparency needs a compositing desktop (KDE Plasma, GNOME and most Wayland desktops have one).
 

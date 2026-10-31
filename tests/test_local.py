@@ -11,7 +11,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bunnydeck.config import KIND_LOCAL, KIND_SSH, Config, Profile  # noqa: E402
-from bunnydeck import terminal  # noqa: E402
+from bunnydeck import sshmux, terminal  # noqa: E402
 
 
 class LocalProfileConfigTest(unittest.TestCase):
@@ -62,10 +62,11 @@ class LocalProfileConfigTest(unittest.TestCase):
 
 
 class LocalArgvTest(unittest.TestCase):
-    def test_ssh_argv_unchanged(self):
+    def test_ssh_argv_shares_the_connection(self):
         p = Profile(name="a", host="h", user="u", port=2200)
-        self.assertEqual(terminal.default_argv(p),
-                         ["/usr/bin/ssh", "-p", "2200", "-l", "u", "--", "h"])
+        self.assertEqual(terminal.default_argv(p), ["/usr/bin/ssh", *sshmux.master_opts(),
+                                                    "-p", "2200", "-l", "u", "--", "h"])
+        self.assertIn("ControlMaster=auto", sshmux.master_opts())
 
     def test_local_uses_shell_without_arguments(self):
         with mock.patch.dict(os.environ, {"SHELL": "/bin/sh"}):

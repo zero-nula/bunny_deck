@@ -13,7 +13,7 @@ from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QKeySequence
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
-from . import background, colorschemes
+from . import background, colorschemes, sshmux
 from .config import Appearance
 from .native import QTermWidget
 
@@ -34,10 +34,11 @@ def local_shell():
 
 
 def default_argv(profile):
-    """Local profiles run the shell without arguments; SSH profiles run ssh."""
+    """Local profiles run the shell without arguments; SSH profiles run ssh,
+    sharing one connection per host (see sshmux.py)."""
     if profile.is_local:
         return [local_shell()]
-    return [SSH_BINARY] + profile.ssh_args()
+    return [SSH_BINARY] + sshmux.master_opts() + profile.ssh_args()
 
 
 def _process_alive(pid):

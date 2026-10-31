@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import colorschemes, mainthread
+from . import colorschemes, mainthread, sshmux
 from .config import KIND_LOCAL, Config, Profile, default_local_appearance, store_background
 from .dialogs import AddAIToolDialog, AddSSHDialog, AppearanceDialog
 from .layout import ABOVE, BELOW, LEFT, RIGHT, HORIZONTAL_SPLIT, VERTICAL_SPLIT, SplitLayout
@@ -525,6 +525,7 @@ def create_application(argv):
         app.setStyleSheet(f.read())
     mainthread.init()
     app.aboutToQuit.connect(lambda: shutil.rmtree(colorschemes.scheme_dir(), True))
+    app.aboutToQuit.connect(sshmux.shutdown)
     return app
 
 

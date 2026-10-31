@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gui_harness import check, make_profile, run, term_text  # noqa: E402
 
 from bunnydeck.filemanager import LOCAL_ID  # noqa: E402
+from bunnydeck import sshmux  # noqa: E402
 
 # A throwaway $HOME (no rc files) and a known shell, set before the app starts.
 HOME = tempfile.mkdtemp(prefix="bunnydeck-test-home-")
@@ -66,8 +67,8 @@ def test(app):
 
     # An SSH session next to it is unaffected and still offers SFTP.
     s = win.open_profile(make_profile("Refused", host="127.0.0.1", port=1))
-    check(s.argv == ["/usr/bin/ssh", "-p", "1", "-l", "tester", "--", "127.0.0.1"],
-          f"ssh argv unchanged ({s.argv})")
+    check(s.argv == ["/usr/bin/ssh", *sshmux.master_opts(), "-p", "1", "-l", "tester", "--",
+                     "127.0.0.1"], f"ssh argv: shared connection + target ({s.argv})")
     check(s.scp_btn.isVisible(), "SCP button visible for an SSH terminal")
     win.open_file_manager(s)
     check(win.current_view() == "files", "file manager opens for an SSH terminal")

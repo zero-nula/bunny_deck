@@ -39,6 +39,7 @@ bunnydeck/sftp.py          SFTP v3 protocol client over `ssh -s host sftp`
 bunnydeck/askpass.py       in-app SSH_ASKPASS endpoint (private Unix socket)
 bunnydeck/askpass_helper.py   helper executed by ssh; forwards prompts to the app
 bunnydeck/connections.py   SFTP connection pool (UI hooks passed in)
+bunnydeck/sshmux.py        one shared SSH connection per host (OpenSSH ControlMaster)
 bunnydeck/transfer.py      Local/Remote backends and the copy engine
 tests/                     unit tests and GUI tests on Xvfb (run_all.sh)
 ```
@@ -129,10 +130,32 @@ The default background of local terminals is
 same directory: a transparent, dim badge shown in Center mode, so it suits
 any background colour.
 
+## Shared connections
+
+Terminals and the file manager share one SSH connection per host through
+OpenSSH connection sharing (`sshmux.py`). A terminal runs ssh with
+`ControlMaster=auto`, `ControlPath=<dir>/%C` and `ControlPersist=60`: the
+first terminal to a host becomes the master (the user logs in there), later
+terminals and the SFTP channel run over it without authenticating again.
+ControlPersist moves the master to the background, so a terminal ends as soon
+as its own session ends even while the file manager still uses the
+connection; an idle master exits after 60 seconds.
+
+The SFTP channel only *uses* a master (`ControlMaster=no` plus the same
+`ControlPath`) and never becomes one: a master started with its restrictive
+options (no agent, X11 or port forwarding) would impose them on terminals
+sharing it. Without a terminal to the host it connects by itself, as before.
+
+The sockets live in a private `0700` directory
+(`$XDG_RUNTIME_DIR/bunny-deck-ssh-*`) of the app run. When the app quits, every
+master is closed with `ssh -O exit` and the directory is removed. Options
+given on the command line take precedence over `ControlMaster` settings in
+`~/.ssh/config`.
+
 ## File manager and SFTP
 
-- The file manager uses its own SSH connection per profile:
-  `ssh <options> -s host sftp`, started with `subprocess.Popen` over pipes
+- The file manager opens one SFTP channel per profile (over the shared
+  connection when a terminal has one): `ssh <options> -s host sftp`, started with `subprocess.Popen` over pipes
   (no PTY). `sftp.py` is a small SFTP v3 client (32 KiB packets, reader and
   stderr threads). `connections.py` keeps one connection per profile and
   connects in worker threads; results reach the UI thread through
