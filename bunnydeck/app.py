@@ -7,7 +7,7 @@ import shutil
 import signal
 import sys
 
-from PyQt6.QtCore import QObject, Qt, QTimer, pyqtClassInfo, pyqtSlot
+from PyQt6.QtCore import QObject, QPoint, QRect, Qt, QTimer, pyqtClassInfo, pyqtSlot
 from PyQt6.QtDBus import QDBusAbstractAdaptor, QDBusConnection, QDBusInterface
 from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWidgets import (
@@ -15,13 +15,13 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import colorschemes, keysetup, mainthread, sshconfig, sshmux
+from . import colorschemes, keysetup, mainthread, shortcuts, sshconfig, sshmux
 from .config import (
     KIND_LOCAL, Config, Profile, default_local_appearance, store_background, validate_host,
 )
 from .dialogs import (
     AddAIToolDialog, AddSSHDialog, AppearanceDialog, CredentialDialog, ImportSSHConfigDialog,
-    KeySetupDialog,
+    KeySetupDialog, ShortcutsDialog,
 )
 from .layout import ABOVE, BELOW, LEFT, RIGHT, HORIZONTAL_SPLIT, VERTICAL_SPLIT, SplitLayout
 from .terminal import TerminalPanel, local_shell
@@ -120,8 +120,11 @@ class MainWindow(QMainWindow):
         self.broadcast_btn.setMinimumWidth(30)
         self.broadcast_btn.toggled.connect(self.set_broadcast_mode)
         h.addWidget(self.broadcast_btn)
-        # Outside a terminal; inside one, the terminal's key filter handles it.
-        QShortcut(QKeySequence("Ctrl+Shift+B"), self, activated=self.broadcast_btn.toggle)
+        # Outside a terminal (e.g. in the file manager) these window-wide
+        # shortcuts apply; inside one, the terminal's key filter handles them.
+        for seq, action in shortcuts.sequences():
+            if action not in ("copy", "paste"):
+                QShortcut(seq, self, activated=lambda a=action: self.run_shortcut(a, None))
 
         h.addStretch(1)
         self.vsplit_btn = QPushButton("Vertical Split")
@@ -349,6 +352,7 @@ class MainWindow(QMainWindow):
         panel.appearanceRequested.connect(self._on_appearance_requested)
         panel.keySetupRequested.connect(lambda p: self.setup_key_login(p.profile))
         panel.broadcastToggleRequested.connect(self.broadcast_btn.toggle)
+        panel.shortcutRequested.connect(lambda p, action: self.run_shortcut(action, p))
         panel.broadcastChanged.connect(self._update_broadcast_button)
         panel.broadcast_peers = lambda p=panel: self._broadcast_peers(p)
         if self.broadcasting:
@@ -367,6 +371,88 @@ class MainWindow(QMainWindow):
         panel.focus_terminal()
         self._on_panel_focused(panel)
         return panel
+
+    # ----- keyboard shortcuts ---------------------------------------------
+
+    def run_shortcut(self, action, panel=None):
+        """Runs a shortcut action (shortcuts.py); panel is the terminal it
+        was pressed in, or None (then the active terminal)."""
+        panel = panel or self.active_panel
+        if action == "new-local":
+            self.open_local()
+        elif action == "new-ssh":
+            self.add_ssh()
+        elif action == "saved-menu":
+            self.saved_button.showMenu()
+        elif action == "broadcast":
+            self.broadcast_btn.toggle()
+        elif action == "help":
+            dlg = ShortcutsDialog(self, shortcuts.OVERVIEW)
+            dlg.exec()
+            dlg.deleteLater()
+        elif action == "files":
+            if self.current_view() == "files":
+                self.show_terminals()
+                if self.active_panel is not None:
+                    self.active_panel.focus_terminal()
+            elif panel is not None:
+                self.open_file_manager(panel)
+        elif self.current_view() != "terminals" or panel is None:
+            return  # the rest acts on terminals, which are not shown
+        elif action == "close":
+            self._on_close_requested(panel)
+        elif action in ("next", "previous"):
+            order = self._panels_in_reading_order()
+            i = order.index(panel) if panel in order else 0
+            self._focus_panel(order[(i + (1 if action == "next" else -1)) % len(order)])
+        elif action.startswith("focus-"):
+            target = self._neighbour(panel, action[len("focus-"):])
+            if target is not None:
+                self._focus_panel(target)
+        elif action.startswith("zoom-"):
+            panel.zoom({"zoom-in": 1, "zoom-out": -1, "zoom-reset": 0}[action])
+
+    def _focus_panel(self, panel):
+        panel.focus_terminal()
+        self._on_panel_focused(panel)
+
+    def _panel_rects(self):
+        return {p: QRect(p.mapTo(self, QPoint(0, 0)), p.size())
+                for p in self.layout_.panels if p.isVisible()}
+
+    def _panels_in_reading_order(self):
+        rects = self._panel_rects()
+        return sorted(rects, key=lambda p: (rects[p].top(), rects[p].left()))
+
+    def _neighbour(self, panel, direction):
+        """The closest terminal in that direction, preferring ones that
+        overlap the current one across the direction of movement."""
+        rects = self._panel_rects()
+        if panel not in rects:
+            return None
+        c = rects[panel]
+        best, best_score = None, None
+        for p, r in rects.items():
+            if p is panel:
+                continue
+            if direction == "left":
+                ok, gap = r.right() < c.left(), c.left() - r.right()
+                overlap = min(r.bottom(), c.bottom()) - max(r.top(), c.top())
+            elif direction == "right":
+                ok, gap = r.left() > c.right(), r.left() - c.right()
+                overlap = min(r.bottom(), c.bottom()) - max(r.top(), c.top())
+            elif direction == "up":
+                ok, gap = r.bottom() < c.top(), c.top() - r.bottom()
+                overlap = min(r.right(), c.right()) - max(r.left(), c.left())
+            else:
+                ok, gap = r.top() > c.bottom(), r.top() - c.bottom()
+                overlap = min(r.right(), c.right()) - max(r.left(), c.left())
+            if not ok:
+                continue
+            score = (overlap <= 0, gap, -overlap)
+            if best_score is None or score < best_score:
+                best, best_score = p, score
+        return best
 
     # ----- broadcast ------------------------------------------------------
 

@@ -547,3 +547,30 @@ class KeySetupDialog(QDialog):
     def reject(self):
         if not self.running:
             super().reject()
+
+
+class ShortcutsDialog(QDialog):
+    """Overview of the keyboard shortcuts (shortcuts.OVERVIEW)."""
+
+    def __init__(self, parent, overview):
+        super().__init__(parent)
+        self.setWindowTitle("Keyboard Shortcuts")
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(18)
+        row = 0
+        for group, entries in overview:
+            title = QLabel(f"<b>{group}</b>")
+            grid.addWidget(title, row, 0, 1, 2)
+            row += 1
+            for keys, text in entries:
+                k = QLabel(keys)
+                k.setObjectName("shortcutKeys")
+                grid.addWidget(k, row, 0)
+                grid.addWidget(QLabel(text), row, 1)
+                row += 1
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        buttons.rejected.connect(self.reject)
+        v = QVBoxLayout(self)
+        v.addLayout(grid)
+        v.addWidget(buttons)
+

@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from . import background, colorschemes, sshmux
+from . import background, colorschemes, shortcuts, sshmux
 from .config import Appearance
 from .native import QTermWidget
 
@@ -58,9 +58,9 @@ def _process_alive(pid):
     return state != "Z"
 
 
-class _ClipboardKeys(QObject):
-    """Ctrl+Shift+C / Ctrl+Shift+V / Shift+Insert / Ctrl+Shift+B for the
-    terminal display, and broadcasting of everything else typed.
+class _TerminalKeys(QObject):
+    """Bunny Deck's shortcuts (shortcuts.py) on the terminal display, and
+    broadcasting of everything else typed.
 
     Konsole's TerminalDisplay claims every key (also as ShortcutOverride),
     so QShortcut never sees these; they are intercepted on the display."""
@@ -70,20 +70,18 @@ class _ClipboardKeys(QObject):
         self.panel = panel
 
     def _action(self, event):
-        mods = event.modifiers() & (Qt.KeyboardModifier.ControlModifier |
-                                    Qt.KeyboardModifier.ShiftModifier |
-                                    Qt.KeyboardModifier.AltModifier |
-                                    Qt.KeyboardModifier.MetaModifier)
-        ctrl_shift = Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier
-        if mods == ctrl_shift and event.key() == Qt.Key.Key_C:
-            return self.panel.copy
-        if mods == ctrl_shift and event.key() == Qt.Key.Key_V:
-            return self.panel.paste
-        if mods == Qt.KeyboardModifier.ShiftModifier and event.key() == Qt.Key.Key_Insert:
-            return self.panel.paste
-        if mods == ctrl_shift and event.key() == Qt.Key.Key_B:
-            return self.panel.broadcastToggleRequested.emit
-        return None
+        name = shortcuts.action_for(event)
+        if name is None:
+            return None
+        local = {
+            "copy": self.panel.copy,
+            "paste": self.panel.paste,
+            "broadcast": self.panel.broadcastToggleRequested.emit,
+            "zoom-in": lambda: self.panel.zoom(1),
+            "zoom-out": lambda: self.panel.zoom(-1),
+            "zoom-reset": lambda: self.panel.zoom(0),
+        }
+        return local.get(name) or (lambda: self.panel.shortcutRequested.emit(self.panel, name))
 
     def eventFilter(self, obj, event):
         t = event.type()
@@ -113,6 +111,8 @@ class TerminalPanel(QWidget):
     appearanceRequested = pyqtSignal(object)
     keySetupRequested = pyqtSignal(object)
     broadcastToggleRequested = pyqtSignal()
+    # (panel, action name from shortcuts.py) for the window's shortcuts
+    shortcutRequested = pyqtSignal(object, str)
     broadcastChanged = pyqtSignal(object)
     focused = pyqtSignal(object)
     # (panel, QMenu): the window fills the Move menu just before it opens.
@@ -130,6 +130,7 @@ class TerminalPanel(QWidget):
         self.running = False
         self._bg_file = ""
         self.broadcast = False
+        self.font_size = FONT_SIZE
         # Set by the window: the other terminals that receive what is typed
         # here while broadcasting (empty otherwise).
         self.broadcast_peers = lambda: []
@@ -243,7 +244,7 @@ class TerminalPanel(QWidget):
         term.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         term.customContextMenuRequested.connect(self._context_menu)
 
-        self._keys = _ClipboardKeys(self)
+        self._keys = _TerminalKeys(self)
         for w in term.findChildren(QWidget):
             if w.metaObject().className() == "Konsole::TerminalDisplay":
                 w.installEventFilter(self._keys)
@@ -344,6 +345,17 @@ class TerminalPanel(QWidget):
 
     def copy(self):
         self.terminal.copyClipboard()
+
+    def zoom(self, step):
+        """Font size of this terminal: +1 / -1 point, 0 back to the default."""
+        size = FONT_SIZE if step == 0 else max(6.0, min(40.0, self.font_size + step))
+        if size == self.font_size:
+            return
+        self.font_size = size
+        font = QFont(FONT_FAMILY)
+        font.setStyleHint(QFont.StyleHint.TypeWriter)
+        font.setPointSizeF(size)
+        self.terminal.setTerminalFont(font)
 
     def paste(self):
         self.terminal.pasteClipboard()

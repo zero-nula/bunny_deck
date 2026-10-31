@@ -39,6 +39,7 @@ bunnydeck/sftp.py          SFTP v3 protocol client over `ssh -s host sftp`
 bunnydeck/askpass.py       in-app SSH_ASKPASS endpoint (private Unix socket)
 bunnydeck/askpass_helper.py   helper executed by ssh; forwards prompts to the app
 bunnydeck/connections.py   SFTP connection pool (UI hooks passed in)
+bunnydeck/shortcuts.py     the keyboard shortcut table (terminal key filter, window, overview)
 bunnydeck/sshmux.py        one shared SSH connection per host (OpenSSH ControlMaster)
 bunnydeck/sshconfig.py     reads hosts from ~/.ssh/config (ssh -G), appends Host entries
 bunnydeck/keysetup.py      key login setup: create key, authorize it, verify
@@ -77,7 +78,10 @@ There is no web rendering. Each terminal is a `TerminalPanel`
 `QTermWidget`, which emulates a VT terminal and draws with Qt
 (`Konsole::TerminalDisplay`). Font: Monospace 10.5 pt, 10 000 lines of
 scrollback. Ctrl+Shift+C/V and Shift+Insert are caught by an event filter on
-the `TerminalDisplay`.
+the `TerminalDisplay`, together with all other shortcuts from
+`shortcuts.py`: Konsole claims every key (also as ShortcutOverride), so a
+QShortcut never sees keys typed in a terminal. The same table also feeds
+window-wide QShortcuts for when the focus is elsewhere (file manager).
 
 - **SSH terminal:** runs `/usr/bin/ssh [-p port] [-l user] -- host`
   (`Profile.ssh_args()`; port 22 is not passed, so a `Port` in
