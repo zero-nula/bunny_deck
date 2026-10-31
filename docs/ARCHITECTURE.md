@@ -225,6 +225,19 @@ order: folders are created if missing, and every file goes through the same
 `copy_file()` path and overwrite question as single files. If a folder
 cannot be created, the files below it are not attempted.
 
+### Deleting
+
+Deleting happens only from the file manager's **Delete** button or Delete
+key, and only after a confirmation that shows what will go (Cancel is the
+default and the Escape button). First a worker thread counts the files and
+folders (`transfer.count_tree`); after confirmation `transfer.delete_path`
+removes them depth-first with `unlink`/`rmdir` (SFTP `REMOVE`/`RMDIR`).
+Symlinks are removed as links and never followed, so nothing outside the
+selected folders can be touched. `transfer.protected` refuses the root
+and the home folder or any folder containing it, before anything is asked.
+Deleting stops at the first error of an item and can be cancelled; what was
+removed until then stays removed.
+
 ### Safe writes
 
 - **Uploads** go to a hidden `.name.XXXX.bunnydeck-part` file and are renamed into place (with `posix-rename` only after you confirm a replace). The only file the app ever removes is its own part file after a failure.

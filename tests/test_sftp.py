@@ -149,9 +149,24 @@ class SFTPClientTest(unittest.TestCase):
         self.c.download(os.path.join(self.root, odd), out)
         self.assertEqual(out.getvalue(), b"x")
 
-    def test_no_remove_api(self):
+    def test_remove_and_rmdir(self):
+        # Deleting exists only as these two explicit calls (used by the file
+        # manager after a confirmation); a symlink is removed, not its target.
+        os.makedirs(os.path.join(self.root, "d"))
+        with open(os.path.join(self.root, "f"), "w") as f:
+            f.write("x")
+        os.symlink("f", os.path.join(self.root, "lnk"))
+        self.c.remove(os.path.join(self.root, "lnk"))
+        self.assertTrue(os.path.exists(os.path.join(self.root, "f")))
+        self.assertFalse(os.path.lexists(os.path.join(self.root, "lnk")))
+        self.c.remove(os.path.join(self.root, "f"))
+        self.c.rmdir(os.path.join(self.root, "d"))
+        for name in ("f", "d"):
+            self.assertFalse(os.path.lexists(os.path.join(self.root, name)))
+        with self.assertRaises(sftp.SFTPError):
+            self.c.remove(os.path.join(self.root, "missing"))
         public = [n for n in dir(self.c) if not n.startswith("_")]
-        for name in ("remove", "unlink", "rmdir", "delete"):
+        for name in ("unlink", "delete", "rmtree"):
             self.assertNotIn(name, public)
 
 

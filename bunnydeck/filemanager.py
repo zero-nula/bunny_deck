@@ -21,7 +21,8 @@ from .connections import ConnectionPool, run_on_main_sync
 from .dialogs import CredentialDialog
 from .mainthread import call_soon
 from .transfer import (
-    LocalBackend, RemoteBackend, TransferError, copy_file, inside, plan_folder, same_place,
+    LocalBackend, RemoteBackend, TransferError, copy_file, count_tree, delete_path, inside,
+    plan_folder, protected, same_place,
 )
 
 LOCAL_ID = "__local__"
@@ -61,6 +62,14 @@ class FileList(QTreeWidget):
     or from local file managers such as Dolphin)."""
 
     dropFiles = pyqtSignal(object, object)  # (source side or None for local URLs, paths)
+    deleteRequested = pyqtSignal()
+
+    def keyPressEvent(self, event):
+        if (event.key() == Qt.Key.Key_Delete
+                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+            self.deleteRequested.emit()
+            return
+        super().keyPressEvent(event)
 
     def __init__(self, pane):
         super().__init__()
@@ -166,6 +175,11 @@ class FilePane(QWidget):
         self.newdir_btn = QPushButton("New Folder")
         self.newdir_btn.clicked.connect(self.new_folder)
         row1.addWidget(self.newdir_btn)
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setObjectName("deleteBtn")
+        self.delete_btn.setToolTip("Delete the selected files and folders (asks first)")
+        self.delete_btn.clicked.connect(lambda: self.fm.delete_selection(self))
+        row1.addWidget(self.delete_btn)
         hv.addLayout(row1)
 
         row2 = QHBoxLayout()
@@ -199,6 +213,7 @@ class FilePane(QWidget):
         self.view = FileList(self)
         self.view.itemActivated.connect(self._on_item_activated)
         self.view.dropFiles.connect(self._on_drop)
+        self.view.deleteRequested.connect(lambda: self.fm.delete_selection(self))
 
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
@@ -727,6 +742,121 @@ class FileManager(QWidget):
                 r.errors.append(f"{name}: {error_text(e)}")
             done_size += size
 
+    # ----- deleting -------------------------------------------------------
+
+    def delete_selection(self, pane):
+        """Counts what the selection contains, asks for confirmation, then
+        deletes it (in a worker thread, with progress and Cancel)."""
+        paths = pane.selected_paths()
+        if not paths:
+            self.message("Nothing selected", "Select the files or folders to delete in the "
+                         f"{pane.side} pane first.")
+            return
+        if self._cancel is not None:
+            self.message("Transfer in progress", "Wait for the current transfer to finish.")
+            return
+        backend = pane.backend
+        refused = [p for p in paths if protected(backend, p)]
+        if refused:
+            self.message("Not deleted", "Bunny Deck does not delete the root or your home "
+                         "folder (or a folder containing it):\n" + "\n".join(refused), error=True)
+            return
+        cancel = threading.Event()
+        self._cancel = cancel
+        self._set_transferring(True)
+        self._progress("Checking what will be deleted…", None)
+
+        def count():
+            items, error = [], None
+            try:
+                for p in paths:
+                    items.append((p, backend.kind(p) == "dir", *count_tree(backend, p, cancel)))
+            except sftp.Cancelled:
+                error = "cancelled"
+            except (OSError, sftp.SFTPError) as e:
+                error = error_text(e)
+            call_soon(lambda: self._confirm_delete(pane, backend, items, error, cancel))
+
+        threading.Thread(target=count, daemon=True).start()
+
+    def _confirm_delete(self, pane, backend, items, error, cancel):
+        if error is not None:
+            self._cancel = None
+            self._set_transferring(False)
+            self.status.setText("Nothing deleted")
+            if error != "cancelled":
+                self.message("Cannot delete", error, error=True)
+            return
+        files = sum(i[2] for i in items)
+        folders = sum(i[3] for i in items)
+        if not self.ask_delete(items, files, folders, backend.label):
+            self._cancel = None
+            self._set_transferring(False)
+            self.status.setText("Nothing deleted")
+            return
+        total = max(1, files + folders)
+
+        def work():
+            done = [0, 0]  # files, folders
+            errors = []
+            last_ui = [0.0]
+
+            def progress(kind, p):
+                done[kind == "dir"] += 1
+                now = time.monotonic()
+                if now - last_ui[0] > 0.08:
+                    last_ui[0] = now
+                    call_soon(lambda: self._progress(f"Deleting {backend.basename(p)}",
+                                                     sum(done) / total))
+
+            for p, *_ in items:
+                if cancel.is_set():
+                    break
+                try:
+                    delete_path(backend, p, cancel, progress)
+                except sftp.Cancelled:
+                    break
+                except (OSError, sftp.SFTPError, TransferError) as e:
+                    errors.append(f"{backend.basename(p)}: {error_text(e)}")
+            call_soon(lambda: self._finish_delete(done, errors, cancel.is_set()))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def ask_delete(self, items, files, folders, where):
+        """The confirmation; True only for an explicit Delete."""
+        names = []
+        for path, is_dir, f, d in items[:10]:
+            name = path.rstrip("/").rsplit("/", 1)[-1]
+            names.append(f"• {name}/  (folder: {f} file(s), {d - 1} subfolder(s))" if is_dir
+                         else f"• {name}")
+        if len(items) > 10:
+            names.append(f"… and {len(items) - 10} more")
+        what = f"{files} file(s)" + (f" and {folders} folder(s)" if folders else "")
+        box = QMessageBox(QMessageBox.Icon.Warning, "Delete permanently?",
+                          f"Delete {what} on {where}?", parent=self.window)
+        box.setInformativeText("\n".join(names) + "\n\nThis cannot be undone: nothing goes "
+                               "to a trash folder.")
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        delete = box.addButton("Delete", QMessageBox.ButtonRole.DestructiveRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        return box.clickedButton() is delete
+
+    def _finish_delete(self, done, errors, cancelled):
+        self._cancel = None
+        self._set_transferring(False)
+        parts = [f"Deleted {done[0]} file(s)" + (f" and {done[1]} folder(s)" if done[1] else "")]
+        if errors:
+            parts.append(f"{len(errors)} failed")
+        if cancelled:
+            parts.append("cancelled")
+        self.status.setText(" · ".join(parts))
+        for pane in (self.left, self.right):
+            pane.refresh()
+        if errors:
+            self.message("Some items were not deleted", "\n".join(errors[:15]), error=True)
+
     def _ask_merge(self, path, where):
         box = QMessageBox(QMessageBox.Icon.Question, "Folder already exists",
                           "Folder already exists", parent=self.window)
@@ -775,6 +905,8 @@ class FileManager(QWidget):
         self.cancel_btn.setVisible(active)
         self.to_left.setEnabled(not active)
         self.to_right.setEnabled(not active)
+        for pane in (self.left, self.right):
+            pane.delete_btn.setEnabled(not active)
         if active:
             self.progress.setValue(0)
 

@@ -120,7 +120,8 @@ Deck stops with a message asking you to run `./build-native.sh` again.
   - **Copy →** and **← Copy** copy the selected files into the other pane's current folder. You can also drag files between panes, or from your file manager into a pane.
   - An existing target is never silently replaced: you choose Replace, Skip, Replace All or Cancel.
   - **Folders** are copied with everything in them, in every direction (also Remote ↔ Remote). If the folder already exists in the target, you are asked once whether to copy into it; files that exist in both are then asked about as above.
-  - Symbolic links and special files (pipes, sockets, devices) inside folders are not copied; the summary says how many were left out. **There is no delete function.**
+  - Symbolic links and special files (pipes, sockets, devices) inside folders are not copied; the summary says how many were left out.
+  - **Delete** (button or the Delete key) removes the selected files and folders, folders with everything in them. It always asks first, showing how many files and folders will go; **Cancel** is the default. Deleting is permanent (there is no trash). A symbolic link is removed itself, never what it points to, and the root or your home folder (or a folder containing it) is never deleted.
 - **Background**: pick a background colour, opacity and an optional image (Fill, Fit, Stretch or Center) for the profile.
   The change applies live to every session of that profile. **Save** stores it; **Reset to Default** restores the default.
   The chosen image is copied to `~/.config/bunny-deck/backgrounds/`, so it stays even if the original is moved.

@@ -6,6 +6,7 @@ remote hosts (e.g. "Ubuntu" and "Raspberry Pi"); no network is involved.
 
 import glob
 import os
+import posixpath
 import shutil
 import sys
 import tempfile
@@ -221,6 +222,63 @@ class TransferTest(unittest.TestCase):
         self.assertTrue(transfer.inside("/a/b", "/a/b"))
         self.assertTrue(transfer.inside("/a/b/c", "/a/b/"))
         self.assertFalse(transfer.inside("/a/bc", "/a/b"))
+
+    def delete_tree(self, root):
+        """project/ (from make_tree) plus links pointing outside it."""
+        src = self.make_tree(root)
+        os.makedirs(os.path.join(root, "outside"))
+        self.write(os.path.join(root, "outside", "keep.txt"), b"keep")
+        os.symlink("../outside", os.path.join(src, "ext-dir"))
+        os.symlink("../outside/keep.txt", os.path.join(src, "ext-file"))
+        return src
+
+    def check_delete(self, backend, root, path):
+        self.assertEqual(transfer.count_tree(backend, path), (7, 4))
+        seen = []
+        transfer.delete_path(backend, path, progress=lambda k, p: seen.append(k))
+        self.assertFalse(os.path.lexists(os.path.join(root, "project")))
+        self.assertEqual(self.read(os.path.join(root, "outside", "keep.txt")), b"keep",
+                         "links are removed, never followed")
+        self.assertEqual((seen.count("file"), seen.count("dir")), (7, 4))
+
+    def test_delete_folder_local(self):
+        src = self.delete_tree(self.local)
+        self.check_delete(self.L, self.local, src)
+
+    def test_delete_folder_remote(self):
+        self.delete_tree(self.ubuntu)
+        self.check_delete(self.U, self.ubuntu, self.U.join(self.U.home, "project"))
+
+    def test_delete_file_and_link(self):
+        self.write(os.path.join(self.ubuntu, "f.txt"), b"x")
+        os.symlink("f.txt", os.path.join(self.ubuntu, "lnk"))
+        self.assertEqual(transfer.count_tree(self.U, self.U.join(self.U.home, "lnk")), (1, 0))
+        transfer.delete_path(self.U, self.U.join(self.U.home, "lnk"))
+        self.assertTrue(os.path.exists(os.path.join(self.ubuntu, "f.txt")))
+        transfer.delete_path(self.U, self.U.join(self.U.home, "f.txt"))
+        self.assertFalse(os.path.exists(os.path.join(self.ubuntu, "f.txt")))
+        with self.assertRaises(transfer.TransferError):
+            transfer.delete_path(self.U, self.U.join(self.U.home, "f.txt"))
+
+    def test_delete_refuses_root_and_home(self):
+        # The remote "home" is the sftp-server's start directory (a temp dir).
+        home = self.U.home
+        self.write(os.path.join(self.ubuntu, "f.txt"), b"x")
+        for path in ("/", home, posixpath.dirname(home)):
+            self.assertTrue(transfer.protected(self.U, path), path)
+            with self.assertRaises(transfer.TransferError):
+                transfer.delete_path(self.U, path)
+        self.assertTrue(os.path.exists(os.path.join(self.ubuntu, "f.txt")))
+        self.assertFalse(transfer.protected(self.U, self.U.join(home, "f.txt")))
+        self.assertTrue(transfer.protected(self.L, os.path.expanduser("~")))
+
+    def test_delete_cancel(self):
+        src = self.make_tree(self.local)
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(sftp.Cancelled):
+            transfer.delete_path(self.L, src, cancel)
+        self.assertTrue(os.path.exists(os.path.join(src, "a.txt")))
 
     def test_folder_rejected(self):
         os.makedirs(os.path.join(self.ubuntu, "dir"))

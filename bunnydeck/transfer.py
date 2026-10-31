@@ -1,9 +1,10 @@
 """File backends (local / SFTP) and the copy engine. No UI code in here.
 
 Remote paths always use POSIX semantics (posixpath), local paths os.path.
-No function in this module deletes user files. The only removals are of
-temporary files/dirs this module itself created (".bunnydeck-part" files and
-the private staging directory used for remote-to-remote copies).
+Copying never deletes user files: its only removals are of temporary files
+and dirs it created itself (".bunnydeck-part" files and the private staging
+directory of remote-to-remote copies). User files are deleted only by
+delete_path(), which the file manager calls after the user confirmed it.
 """
 
 import errno
@@ -103,6 +104,21 @@ class LocalBackend:
     def mkdir(self, path):
         os.mkdir(path, 0o755)
 
+    def kind(self, path):
+        """"dir", "file" (also links and special files) or None; links are
+        not followed."""
+        try:
+            st = os.lstat(path)
+        except FileNotFoundError:
+            return None
+        return "dir" if stat.S_ISDIR(st.st_mode) else "file"
+
+    def remove(self, path):
+        os.unlink(path)
+
+    def rmdir(self, path):
+        os.rmdir(path)
+
 
 class RemoteBackend:
     is_remote = True
@@ -148,6 +164,21 @@ class RemoteBackend:
 
     def mkdir(self, path):
         self.client.mkdir(path)
+
+    def kind(self, path):
+        try:
+            a = self.client.lstat(path)
+        except sftp.SFTPError as e:
+            if e.code == sftp.FX_NO_SUCH_FILE:
+                return None
+            raise
+        return "dir" if a.is_dir else "file"
+
+    def remove(self, path):
+        self.client.remove(path)
+
+    def rmdir(self, path):
+        self.client.rmdir(path)
 
 
 def same_place(a, b):
@@ -205,6 +236,69 @@ def plan_folder(src_backend, src_dir, dst_backend, dst_dir, cancel=None):
             else:
                 plan.files.append((sp, dp, it.size, r))
     return plan
+
+
+def protected(backend, path):
+    """Paths the file manager refuses to delete: the root and the home
+    folder, or any folder containing it."""
+    return path.rstrip("/") in ("", "/") or inside(backend.home, path)
+
+
+def _walk_tree(backend, path, cancel):
+    """Yields ("file", p) and, after their contents, ("dir", p) for
+    everything below path, then ("dir", path). Symlinks count as files: they
+    are never followed."""
+    stack = [(path, False)]
+    while stack:
+        if cancel is not None and cancel.is_set():
+            raise sftp.Cancelled()
+        p, listed = stack.pop()
+        if listed:
+            yield "dir", p
+            continue
+        stack.append((p, True))
+        for it in backend.list(p):
+            child = backend.join(p, it.name)
+            if it.is_dir and not it.is_link:
+                stack.append((child, False))
+            else:
+                yield "file", child
+
+
+def count_tree(backend, path, cancel=None):
+    """(files, folders) that deleting path removes, path itself included."""
+    if backend.kind(path) != "dir":
+        return 1, 0
+    files = folders = 0
+    for kind, _ in _walk_tree(backend, path, cancel):
+        if kind == "dir":
+            folders += 1
+        else:
+            files += 1
+    return files, folders
+
+
+def delete_path(backend, path, cancel=None, progress=None):
+    """Deletes a file, a symlink (not its target) or a folder with all its
+    contents. progress(kind, path) after each removal. Stops at the first
+    error (raised); what was removed until then stays removed."""
+    if protected(backend, path):
+        raise TransferError("Bunny Deck does not delete the root or your home folder "
+                            "(or a folder containing it)")
+    kind = backend.kind(path)
+    if kind is None:
+        raise TransferError(f"No longer exists: {path}")
+    if kind == "file":
+        backend.remove(path)
+        if progress:
+            progress("file", path)
+        return
+    for kind, p in _walk_tree(backend, path, cancel):
+        if cancel is not None and cancel.is_set():
+            raise sftp.Cancelled()
+        (backend.rmdir if kind == "dir" else backend.remove)(p)
+        if progress:
+            progress(kind, p)
 
 
 def _staging_dir():

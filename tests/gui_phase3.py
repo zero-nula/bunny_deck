@@ -192,10 +192,11 @@ def test(app):
     if SHOTS:
         screenshot(win, os.path.join(SHOTS, "qt-file-manager.png"))
 
-    # --- no delete action anywhere in the file manager UI ----------------
+    # --- the only delete actions are the panes' Delete buttons -------------
+    # (they always ask first: tests/gui_delete.py)
     labels = [b.text().lower() for b in fm.findChildren(QPushButton) + fm.findChildren(QToolButton)]
-    check(labels and not any("delete" in s or "remove" in s for s in labels),
-          f"no delete/remove buttons ({len(labels)} buttons checked)")
+    check(labels.count("delete") == 2 and not any("remove" in s for s in labels),
+          f"one Delete button per pane, nothing else deletes ({len(labels)} buttons checked)")
 
     # --- terminals kept running in the background -------------------------
     check((t_u.child_pid, t_r.child_pid) == pids and t_u.running and t_r.running,

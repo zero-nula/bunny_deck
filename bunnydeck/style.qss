@@ -204,3 +204,8 @@ QSplitter::handle:hover {
     background-color: #2a1d10;
     color: #ffffff;
 }
+
+QPushButton#deleteBtn:hover {
+    background-color: #8a2d2b;
+    color: #ffffff;
+}

@@ -503,6 +503,16 @@ class SFTPClient:
             _, data = self._request(FXP_RENAME, s_str(enc(src)) + s_str(enc(dst)))
         self._status(data, dst)
 
+    def remove(self, path):
+        """Deletes a file or symlink (never what a symlink points to)."""
+        _, data = self._request(FXP_REMOVE, s_str(enc(path)))
+        self._status(data, path)
+
+    def rmdir(self, path):
+        """Deletes an empty folder."""
+        _, data = self._request(FXP_RMDIR, s_str(enc(path)))
+        self._status(data, path)
+
     def _remove_own_tempfile(self, path):
         """Removes a '.bunnydeck-part' file this client created (O_EXCL)."""
         assert posixpath.basename(path).endswith(".bunnydeck-part")
