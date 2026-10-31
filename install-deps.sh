@@ -75,7 +75,9 @@ case "$IDS" in
       fi
       qtw_dev=libqtermwidget-dev
     fi
-    pkgs=(python3-pyqt6 libqtermwidget6-2 qtermwidget-data openssh-client
+    # (libqtermwidget6-2 pulls in its data package: qtermwidget-data on
+    # Debian, qtermwidget6-data on Ubuntu.)
+    pkgs=(python3-pyqt6 libqtermwidget6-2 openssh-client
           pyqt6-dev sip-tools python3-pyqtbuild "$qtw_dev" qt6-base-dev qmake6
           build-essential pkg-config)
     [ "$TESTS" = 1 ] && pkgs+=(openssh-server xvfb dbus fonts-dejavu-core)

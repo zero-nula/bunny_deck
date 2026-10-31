@@ -65,7 +65,7 @@ running it. These are the packages it installs:
 | openSUSE Tumbleweed | `python313-PyQt6` `libqtermwidget6-2` `qtermwidget-data` `openssh-clients` `python313-PyQt6-devel` `python313-pyqt-builder` `python313-sip6-devel` `qtermwidget-devel` `qt6-base-common-devel` `gcc-c++` `make` `pkg-config` |
 | Fedora | `python3-pyqt6` `qtermwidget` `openssh-clients` `python3-pyqt6-devel` `PyQt-builder` `sip6` `qtermwidget-devel` `qt6-qtbase-devel` `gcc-c++` `make` `pkgconf-pkg-config` |
 | Arch Linux | `python-pyqt6` `qtermwidget` `openssh` `sip` `python-pyqt-builder` `qt6-base` `base-devel` `pkgconf` |
-| Debian | `python3-pyqt6` `libqtermwidget6-2` `qtermwidget-data` `openssh-client` `pyqt6-dev` `sip-tools` `python3-pyqtbuild` `libqtermwidget-dev` `qt6-base-dev` `qmake6` `build-essential` `pkg-config` |
+| Debian | `python3-pyqt6` `libqtermwidget6-2` `openssh-client` `pyqt6-dev` `sip-tools` `python3-pyqtbuild` `libqtermwidget-dev` `qt6-base-dev` `qmake6` `build-essential` `pkg-config` |
 | Ubuntu | as Debian, with `libqtermwidget6-2-dev` instead of `libqtermwidget-dev` |
 
 On openSUSE, the `python313-` prefix follows your Python version; the script
