@@ -105,8 +105,8 @@ Deck stops with a message asking you to run `./build-native.sh` again.
     It never changes the server's SSH settings: password logins stay allowed until you turn them off yourself.
 - **AI ▾**: your own list of AI assistants. **Add…** asks for the command (for example `claude` or `opencode --continue`) and a name; **Remove** takes one off the list.
   Choosing one runs its command in a new local terminal, in your shell with `~/.bashrc` loaded; when it exits, the shell stays open.
-- **⇉ Broadcast** (or Ctrl+Shift+B): each terminal gets a tick box. What you type in a ticked terminal — keys, Enter, Ctrl+C, pastes — goes to every ticked terminal.
-  SSH terminals are ticked when you turn it on, local terminals and terminals opened later are not. Ticked terminals have an orange frame, and the button shows how many there are.
+- **⇉ Broadcast** (or Ctrl+Shift+B): each terminal gets a tick box; tick the ones that should take part. What you type in a ticked terminal — keys, Enter, Ctrl+C, pastes — goes to every ticked terminal.
+  Nothing is ticked when you turn it on. Ticked terminals have an orange frame, and the button shows how many there are.
   Broadcast is always off when Bunny Deck starts.
 - **Vertical Split** puts terminals side by side. **Horizontal Split** stacks them top to bottom.
   You can drag the dividers. Adding or closing a terminal re-balances the layout.

@@ -186,6 +186,19 @@ QSplitter::handle:hover {
     background-color: #2a1d10;
 }
 
+/* The tick box must stand out on the dark header. */
+#termHeader QCheckBox#broadcastBox::indicator {
+    width: 12px;
+    height: 12px;
+    border: 1px solid #e8913a;
+    border-radius: 2px;
+    background-color: #121418;
+}
+
+#termHeader QCheckBox#broadcastBox::indicator:checked {
+    background-color: #e8913a;
+}
+
 #deckToolbar QPushButton#broadcastBtn:checked {
     border-color: #e8913a;
     background-color: #2a1d10;

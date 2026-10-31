@@ -1,7 +1,6 @@
-"""GUI test: broadcast typing. With Broadcast on, keys typed in one ticked
-terminal (letters, Enter, Ctrl+C), pastes go to every ticked terminal and
-nowhere else; local terminals and new terminals are not ticked by default;
-Ctrl+Shift+B turns it off."""
+"""GUI test: broadcast typing. Turning Broadcast on ticks no terminal; keys
+typed in one ticked terminal (letters, Enter, Ctrl+C) and pastes go to every
+ticked terminal and nowhere else; Ctrl+Shift+B turns it off."""
 
 import os
 import sys
@@ -35,8 +34,16 @@ def test(app):
     win.broadcast_btn.click()
     check(win.broadcasting and all(p.broadcast_box.isVisible() for p in (a, b, c, local)),
           "Broadcast shows a tick box on every terminal")
-    check(a.broadcast and b.broadcast and c.broadcast and not local.broadcast,
-          "SSH terminals ticked, the local terminal not")
+    check(not any(p.broadcast for p in (a, b, c, local))
+          and win.broadcast_btn.text() == "⇉ Broadcast: 0",
+          "nothing is ticked: the user picks the terminals")
+    type_line(a, "echo NONE-$((5*5))")
+    yield lambda: "NONE-25" in term_text(a)
+    yield 0.3
+    check("NONE-25" not in term_text(b), "typing in an unticked terminal stays there")
+
+    for p in (a, b, c):
+        p.broadcast_box.click()
     check(win.broadcast_btn.text() == "⇉ Broadcast: 3", f"button counts ({win.broadcast_btn.text()})")
     check(a.property("broadcast") is True, "ticked terminals are highlighted")
     c.broadcast_box.click()

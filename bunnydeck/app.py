@@ -352,7 +352,7 @@ class MainWindow(QMainWindow):
         panel.broadcastChanged.connect(self._update_broadcast_button)
         panel.broadcast_peers = lambda p=panel: self._broadcast_peers(p)
         if self.broadcasting:
-            panel.set_broadcast_mode(True, include=False)  # joins only when ticked
+            panel.set_broadcast_mode(True, include=False)
         panel.scpRequested.connect(self.open_file_manager)
         panel.focused.connect(self._on_panel_focused)
         panel.moveMenuRequested.connect(self._fill_move_menu)
@@ -371,13 +371,13 @@ class MainWindow(QMainWindow):
     # ----- broadcast ------------------------------------------------------
 
     def set_broadcast_mode(self, on):
-        """Turns broadcast on (all SSH terminals ticked; local ones not, so
-        server commands never run here by accident) or off."""
+        """Turns broadcast on or off. Turning it on ticks nothing: the user
+        picks the terminals that should receive the typing."""
         self.broadcasting = on
         if self.broadcast_btn.isChecked() != on:
             self.broadcast_btn.setChecked(on)
         for p in self.layout_.panels:
-            p.set_broadcast_mode(on, include=not p.profile.is_local)
+            p.set_broadcast_mode(on, include=False)
         self._update_broadcast_button()
 
     def _broadcast_peers(self, panel):
