@@ -160,6 +160,68 @@ class TransferTest(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.rpi, "big")))
         self.assertTrue(self.no_parts())
 
+    def make_tree(self, root):
+        """project/{a.txt, sub/{b.txt, deeper/c.txt}, empty/, link -> sub, fifo}"""
+        os.makedirs(os.path.join(root, "project", "sub", "deeper"))
+        os.makedirs(os.path.join(root, "project", "empty"))
+        self.write(os.path.join(root, "project", "a.txt"), b"aaa")
+        self.write(os.path.join(root, "project", "sub", "b.txt"), b"bb")
+        self.write(os.path.join(root, "project", "sub", "deeper", "c.txt"), b"c")
+        os.symlink("sub", os.path.join(root, "project", "link"))
+        os.mkfifo(os.path.join(root, "project", "fifo"))
+        return os.path.join(root, "project")
+
+    def check_plan(self, plan, dst):
+        self.assertEqual([rel for _, rel in plan.dirs],
+                         ["project", "project/empty", "project/sub", "project/sub/deeper"])
+        self.assertEqual(plan.dirs[0][0], dst)
+        self.assertEqual(sorted(f[3] for f in plan.files),
+                         ["project/a.txt", "project/sub/b.txt", "project/sub/deeper/c.txt"])
+        self.assertEqual(plan.total, 6)
+        self.assertEqual(sorted(plan.skipped), ["project/fifo", "project/link"],
+                         "symlinks are not followed, special files not copied")
+        self.assertEqual(plan.errors, [])
+
+    def test_plan_folder_local(self):
+        src = self.make_tree(self.local)
+        dst = self.U.join(self.U.home, "project")
+        self.check_plan(transfer.plan_folder(self.L, src, self.U, dst), dst)
+
+    def test_plan_folder_remote(self):
+        self.make_tree(self.ubuntu)
+        src = self.U.join(self.U.home, "project")
+        dst = os.path.join(self.local, "project")
+        self.check_plan(transfer.plan_folder(self.U, src, self.L, dst), dst)
+
+    def test_plan_folder_unreadable_subfolder(self):
+        src = self.make_tree(self.local)
+        locked = os.path.join(src, "sub", "deeper")
+        os.chmod(locked, 0)
+        try:  # (restored here: tearDown runs before addCleanup)
+            if os.access(locked, os.R_OK):
+                self.skipTest("running as root")
+            plan = transfer.plan_folder(self.L, src, self.L, os.path.join(self.base, "x"))
+        finally:
+            os.chmod(locked, 0o755)
+        self.assertEqual([rel for rel, _ in plan.errors], ["project/sub/deeper"])
+        self.assertIn("project/sub/b.txt", [f[3] for f in plan.files])
+
+    def test_plan_folder_cancel(self):
+        src = self.make_tree(self.local)
+        cancel = threading.Event()
+        cancel.set()
+        with self.assertRaises(sftp.Cancelled):
+            transfer.plan_folder(self.L, src, self.L, os.path.join(self.base, "x"), cancel)
+
+    def test_same_place_and_inside(self):
+        self.assertTrue(transfer.same_place(self.L, LocalBackend()))
+        self.assertTrue(transfer.same_place(self.U, RemoteBackend(self.cu, "again")))
+        self.assertFalse(transfer.same_place(self.U, self.R))
+        self.assertFalse(transfer.same_place(self.L, self.U))
+        self.assertTrue(transfer.inside("/a/b", "/a/b"))
+        self.assertTrue(transfer.inside("/a/b/c", "/a/b/"))
+        self.assertFalse(transfer.inside("/a/bc", "/a/b"))
+
     def test_folder_rejected(self):
         os.makedirs(os.path.join(self.ubuntu, "dir"))
         with self.assertRaises(transfer.TransferError):

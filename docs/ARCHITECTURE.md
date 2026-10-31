@@ -212,6 +212,19 @@ changed.
   files, and are not cached. A wrong password asks again with a warning;
   Cancel stops the attempt. `sshpass` is not used.
 
+### Copying folders
+
+The transfer worker first expands the selection into jobs:
+`transfer.plan_folder()` lists a folder recursively into the folders to
+create (parents first) and the files to copy, with their total size for one
+overall progress bar. Symlinks are never followed — the walk cannot loop or
+leave the folder — and are skipped like special files (a FIFO would block a
+copy forever). A subfolder that cannot be read is reported and the rest is
+still copied. Copying a folder into itself is refused. Then the jobs run in
+order: folders are created if missing, and every file goes through the same
+`copy_file()` path and overwrite question as single files. If a folder
+cannot be created, the files below it are not attempted.
+
 ### Safe writes
 
 - **Uploads** go to a hidden `.name.XXXX.bunnydeck-part` file and are renamed into place (with `posix-rename` only after you confirm a replace). The only file the app ever removes is its own part file after a failure.

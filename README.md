@@ -119,7 +119,8 @@ Deck stops with a message asking you to run `./build-native.sh` again.
   - Each pane has its own source selector (Local or any open or saved connection), Up, Home, an editable path, Reload, New Folder and a hidden-files toggle.
   - **Copy →** and **← Copy** copy the selected files into the other pane's current folder. You can also drag files between panes, or from your file manager into a pane.
   - An existing target is never silently replaced: you choose Replace, Skip, Replace All or Cancel.
-  - Only regular files are copied; folders are reported as skipped. **There is no delete function.**
+  - **Folders** are copied with everything in them, in every direction (also Remote ↔ Remote). If the folder already exists in the target, you are asked once whether to copy into it; files that exist in both are then asked about as above.
+  - Symbolic links and special files (pipes, sockets, devices) inside folders are not copied; the summary says how many were left out. **There is no delete function.**
 - **Background**: pick a background colour, opacity and an optional image (Fill, Fit, Stretch or Center) for the profile.
   The change applies live to every session of that profile. **Save** stores it; **Reset to Default** restores the default.
   The chosen image is copied to `~/.config/bunny-deck/backgrounds/`, so it stays even if the original is moved.
@@ -136,7 +137,7 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Known limitations
 
-- Folder transfers, synchronisation and transfer queues are not implemented.
+- Synchronisation and transfer queues are not implemented. Symbolic links inside copied folders are left out.
 - The shared connection is started by a terminal. If you open the file manager for a server without a terminal to it, it connects (and asks for a password) on its own.
 - The terminal header cannot tell a failed connection from a closed one (QTermWidget does not report the exit code).
 - Window transparency needs a compositing desktop (KDE Plasma, GNOME and most Wayland desktops have one).

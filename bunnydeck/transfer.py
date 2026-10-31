@@ -25,6 +25,8 @@ class FileItem:
     size: int
     mtime: int
     is_link: bool = False
+    # Neither a regular file nor a folder (FIFO, socket, device): never copied.
+    is_special: bool = False
 
 
 class TransferError(Exception):
@@ -83,8 +85,9 @@ class LocalBackend:
                         st = e.stat()
                     except OSError:
                         st = e.stat(follow_symlinks=False)
-                    items.append(FileItem(e.name, stat.S_ISDIR(st.st_mode), st.st_size,
-                                          int(st.st_mtime), is_link))
+                    is_dir = stat.S_ISDIR(st.st_mode)
+                    items.append(FileItem(e.name, is_dir, st.st_size, int(st.st_mtime), is_link,
+                                          not is_dir and not stat.S_ISREG(st.st_mode)))
                 except OSError:
                     items.append(FileItem(e.name, False, 0, 0))
         return items
@@ -123,7 +126,9 @@ class RemoteBackend:
 
     def list(self, path):
         return [
-            FileItem(e.name, e.is_dir, e.attrs.size or 0, e.attrs.mtime or 0, e.attrs.is_link)
+            FileItem(e.name, e.is_dir, e.attrs.size or 0, e.attrs.mtime or 0, e.attrs.is_link,
+                     e.attrs.permissions is not None and not e.is_dir and not e.attrs.is_link
+                     and not e.attrs.is_reg)
             for e in self.client.listdir(path)
         ]
 
@@ -143,6 +148,63 @@ class RemoteBackend:
 
     def mkdir(self, path):
         self.client.mkdir(path)
+
+
+def same_place(a, b):
+    """Whether two backends show the same file system."""
+    if not a.is_remote and not b.is_remote:
+        return True
+    return a.is_remote and b.is_remote and a.client is b.client
+
+
+def inside(path, folder):
+    """Whether path is folder itself or below it (both normalized, POSIX)."""
+    folder = folder.rstrip("/")
+    return path == folder or path.startswith(folder + "/")
+
+
+@dataclass
+class FolderPlan:
+    """What copying a folder takes, found by plan_folder()."""
+    dirs: list      # (target folder, relative name) to create, parents first
+    files: list     # (source, target, size, relative name)
+    skipped: list   # relative names of symlinks and special files (not copied)
+    errors: list    # (relative name, exception) of folders that could not be read
+
+    @property
+    def total(self):
+        return sum(f[2] for f in self.files)
+
+
+def plan_folder(src_backend, src_dir, dst_backend, dst_dir, cancel=None):
+    """Lists src_dir recursively for copying it to dst_dir. Symlinks are not
+    followed (so the walk cannot loop or leave the folder) and, like special
+    files, are skipped. A subfolder that cannot be read is reported in
+    errors and the rest is still copied."""
+    root = src_backend.basename(src_dir)
+    plan = FolderPlan([(dst_dir, root)], [], [], [])
+    stack = [(src_dir, dst_dir, root)]
+    while stack:
+        if cancel is not None and cancel.is_set():
+            raise sftp.Cancelled()
+        s, d, rel = stack.pop()
+        try:
+            items = src_backend.list(s)
+        except (OSError, sftp.SFTPError) as e:
+            plan.errors.append((rel, e))
+            continue
+        for it in sorted(items, key=lambda i: i.name):
+            r = f"{rel}/{it.name}"
+            if it.is_link or it.is_special:
+                plan.skipped.append(r)
+                continue
+            sp, dp = src_backend.join(s, it.name), dst_backend.join(d, it.name)
+            if it.is_dir:
+                plan.dirs.append((dp, r))
+                stack.append((sp, dp, r))
+            else:
+                plan.files.append((sp, dp, it.size, r))
+    return plan
 
 
 def _staging_dir():
@@ -239,7 +301,7 @@ def copy_file(src_backend, src_path, dst_backend, dst_path, overwrite=False,
     if not exists:
         raise TransferError(f"Source does not exist: {src_path}")
     if is_dir:
-        raise TransferError(f"Folders are not supported (skipped): {src_path}")
+        raise TransferError(f"Is a folder (use plan_folder): {src_path}")
 
     def prog(offset, total):
         return (lambda n: progress(offset + n, total)) if progress else None

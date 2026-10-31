@@ -20,7 +20,9 @@ from . import sftp
 from .connections import ConnectionPool, run_on_main_sync
 from .dialogs import CredentialDialog
 from .mainthread import call_soon
-from .transfer import LocalBackend, RemoteBackend, TransferError, copy_file
+from .transfer import (
+    LocalBackend, RemoteBackend, TransferError, copy_file, inside, plan_folder, same_place,
+)
 
 LOCAL_ID = "__local__"
 MIME_INTERNAL = "application/x-bunnydeck-files"
@@ -39,6 +41,14 @@ def error_text(e):
     if isinstance(e, OSError) and e.strerror:
         return f"{e.strerror}: {e.filename}" if e.filename else e.strerror
     return str(e) or e.__class__.__name__
+
+
+class _TransferResult:
+    """Counters of one transfer, filled by the worker thread."""
+
+    def __init__(self):
+        self.files = self.folders = self.bytes = self.skipped = self.links = 0
+        self.errors = []
 
 
 def _icon(name, fallback):
@@ -588,63 +598,151 @@ class FileManager(QWidget):
         return self._cancel is not None
 
     def _transfer_worker(self, src_backend, paths, dst_backend, dst_dir, dst_pane, cancel):
-        done_files, total_bytes, errors, skipped = 0, 0, [], 0
-        overwrite_all = False
-        last_ui = [0.0]
+        r = _TransferResult()
 
         def ui(fn, *a):
             call_soon(lambda: fn(*a))
 
-        for idx, src in enumerate(paths):
+        jobs = self._plan_jobs(src_backend, paths, dst_backend, dst_dir, cancel, r, ui)
+        if not cancel.is_set():
+            self._run_jobs(src_backend, dst_backend, jobs, cancel, r, ui)
+        ui(self._finish_transfer, r, cancel.is_set(), dst_pane)
+
+    def _plan_jobs(self, src_backend, paths, dst_backend, dst_dir, cancel, r, ui):
+        """Expands the selection into ("dir", target, name) and
+        ("file", source, target, size, name) jobs, parents first."""
+        jobs = []
+        for src in paths:
             if cancel.is_set():
                 break
             name = src_backend.basename(src)
             dst = dst_backend.join(dst_dir, name)
-            label = f"[{idx + 1}/{len(paths)}] {name}"
-            ui(self._progress, label, 0.0)
+            try:
+                exists, is_dir, size, _ = src_backend.stat(src)
+                if not exists:
+                    raise TransferError("No longer exists")
+                if not is_dir:
+                    jobs.append(("file", src, dst, size, name))
+                    continue
+                if same_place(src_backend, dst_backend) and inside(dst, src):
+                    raise TransferError("A folder cannot be copied into itself")
+                d_exists, d_is_dir, _, _ = dst_backend.stat(dst)
+                if d_exists and not d_is_dir:
+                    raise TransferError(f"A file named “{name}” already exists in the target")
+                if d_exists:
+                    answer = run_on_main_sync(call_soon, self._ask_merge, dst, dst_backend.label)
+                    if answer == "cancel":
+                        cancel.set()
+                        break
+                    if answer == "skip":
+                        r.skipped += 1
+                        continue
+                ui(self._progress, f"Reading folder {name}…", None)
+                plan = plan_folder(src_backend, src, dst_backend, dst, cancel)
+                jobs += [("dir", d, rel) for d, rel in plan.dirs]
+                jobs += [("file", *f) for f in plan.files]
+                r.links += len(plan.skipped)
+                r.errors += [f"{rel}: {error_text(e)}" for rel, e in plan.errors]
+            except sftp.Cancelled:
+                break
+            except (OSError, sftp.SFTPError, TransferError) as e:
+                r.errors.append(f"{name}: {error_text(e)}")
+        return jobs
+
+    def _run_jobs(self, src_backend, dst_backend, jobs, cancel, r, ui):
+        files = [j for j in jobs if j[0] == "file"]
+        total = sum(j[3] for j in files)
+        done_size = 0  # planned bytes of the files already handled
+        failed_dirs = []
+        overwrite_all = False
+        last_ui = [0.0]
+        index = 0
+
+        for job in jobs:
+            if cancel.is_set():
+                break
+            if job[0] == "dir":
+                _, d, rel = job
+                try:
+                    exists, is_dir, _, _ = dst_backend.stat(d)
+                    if exists and not is_dir:
+                        raise TransferError("A file with this name is in the way")
+                    if not exists:
+                        dst_backend.mkdir(d)
+                        r.folders += 1
+                except (OSError, sftp.SFTPError, TransferError) as e:
+                    failed_dirs.append(d)
+                    r.errors.append(f"{rel}: {error_text(e)}")
+                continue
+
+            _, src, dst, size, name = job
+            index += 1
+            if any(inside(dst, f) for f in failed_dirs):
+                done_size += size  # its folder failed; already reported
+                continue
+            label = f"[{index}/{len(files)}] {name}"
+            ui(self._progress, label, (done_size / total) if total else None)
             try:
                 exists, is_dir, _, _ = dst_backend.stat(dst)
                 overwrite = False
                 if exists:
                     if is_dir:
-                        raise TransferError(f"A folder named “{name}” already exists in "
-                                            "the target")
-                    if src_backend is dst_backend and src == dst:
+                        raise TransferError(f"A folder named “{dst_backend.basename(dst)}” "
+                                            "already exists in the target")
+                    if same_place(src_backend, dst_backend) and src == dst:
                         raise TransferError("Source and target are the same file")
                     if overwrite_all:
                         overwrite = True
                     else:
                         answer = run_on_main_sync(call_soon, self._ask_overwrite, dst,
-                                                  dst_backend.label, len(paths) - idx > 1)
+                                                  dst_backend.label, len(files) - index > 0)
                         if answer == "cancel":
                             cancel.set()
                             break
                         if answer == "skip":
-                            skipped += 1
+                            r.skipped += 1
+                            done_size += size
                             continue
                         overwrite = True
                         overwrite_all = answer == "all"
 
-                def progress(d, t):
+                def progress(d, t, before=done_size, size=size):
                     now = time.monotonic()
                     if now - last_ui[0] > 0.08 or d >= t:
                         last_ui[0] = now
-                        ui(self._progress, None, (d / t) if t else 1.0)
+                        part = (d / t) if t else 1.0
+                        ui(self._progress, None,
+                           ((before + part * size) / total) if total else part)
 
                 def phase(text, label=label):
                     ui(self._progress, f"{label} — {text}", None)
 
                 n = copy_file(src_backend, src, dst_backend, dst, overwrite=overwrite,
                               progress=progress, cancel=cancel, phase=phase)
-                done_files += 1
-                total_bytes += n
+                r.files += 1
+                r.bytes += n
             except sftp.Cancelled:
                 break
             except (OSError, sftp.SFTPError, TransferError) as e:
-                errors.append(f"{name}: {error_text(e)}")
+                r.errors.append(f"{name}: {error_text(e)}")
+            done_size += size
 
-        ui(self._finish_transfer, done_files, total_bytes, skipped, errors,
-           cancel.is_set(), dst_pane)
+    def _ask_merge(self, path, where):
+        box = QMessageBox(QMessageBox.Icon.Question, "Folder already exists",
+                          "Folder already exists", parent=self.window)
+        box.setInformativeText(f"{path}\non {where} already exists. Copy into it? Files that "
+                               "exist in both are asked about one by one.")
+        box.addButton("Cancel Transfer", QMessageBox.ButtonRole.RejectRole)
+        skip = box.addButton("Skip Folder", QMessageBox.ButtonRole.NoRole)
+        merge = box.addButton("Copy Into It", QMessageBox.ButtonRole.AcceptRole)
+        box.setDefaultButton(merge)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is merge:
+            return "merge"
+        if clicked is skip:
+            return "skip"
+        return "cancel"
 
     def _ask_overwrite(self, path, where, multiple):
         box = QMessageBox(QMessageBox.Icon.Warning, "File already exists",
@@ -680,20 +778,27 @@ class FileManager(QWidget):
         if active:
             self.progress.setValue(0)
 
-    def _finish_transfer(self, files, nbytes, skipped, errors, cancelled, dst_pane):
+    def _finish_transfer(self, r, cancelled, dst_pane):
         self._cancel = None
         self._set_transferring(False)
-        parts = [f"Copied {files} file(s), {human_size(nbytes)}"]
-        if skipped:
-            parts.append(f"{skipped} skipped")
-        if errors:
-            parts.append(f"{len(errors)} failed")
+        copied = f"Copied {r.files} file(s)"
+        if r.folders:
+            copied += f" and {r.folders} folder(s)"
+        parts = [f"{copied}, {human_size(r.bytes)}"]
+        if r.skipped:
+            parts.append(f"{r.skipped} skipped")
+        if r.links:
+            parts.append(f"{r.links} link(s)/special file(s) not copied")
+        if r.errors:
+            parts.append(f"{len(r.errors)} failed")
         if cancelled:
             parts.append("cancelled")
         self.status.setText(" · ".join(parts))
         dst_pane.refresh()
-        if errors:
-            self.message("Some files were not copied", "\n".join(errors[:15]), error=True)
+        if r.errors:
+            more = f"\n… and {len(r.errors) - 15} more" if len(r.errors) > 15 else ""
+            self.message("Some files were not copied", "\n".join(r.errors[:15]) + more,
+                         error=True)
 
     # ----- misc -----------------------------------------------------------
 
