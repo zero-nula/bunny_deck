@@ -128,22 +128,10 @@ Deck stops with a message asking you to run `./build-native.sh` again.
 
 ### Keyboard shortcuts
 
-`Ctrl+Shift+?` shows this list in the app. Apart from the font size, all
-use Ctrl+Shift or Alt+arrows, so the usual Ctrl keys (Ctrl+C, Ctrl+R, …)
-stay with the programs in the terminal.
-
-| Keys | Action |
-|---|---|
-| `Ctrl+Shift+T` | New local terminal |
-| `Ctrl+Shift+N` | New SSH connection |
-| `Ctrl+Shift+O` | Open a saved connection (menu) |
-| `Ctrl+Shift+W` | Close the current terminal (asks if it is running) |
-| `Ctrl+Shift+F` | File manager for the current terminal, and back |
-| `Ctrl+Shift+B` | Broadcast on / off |
-| `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | Go to the terminal to the left, right, above, below |
-| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous terminal |
-| `Ctrl++` / `Ctrl+-` / `Ctrl+0` | Font of the current terminal: larger / smaller / default (not saved) |
-| `Ctrl+Shift+C` / `Ctrl+Shift+V`, `Shift+Insert` | Copy / paste |
+New terminals, closing, the file manager, moving between terminals
+(`Alt+arrows`, `Ctrl+Tab`) and the font size (`Ctrl++`, `Ctrl+-`, `Ctrl+0`)
+all have shortcuts. See [docs/SHORTCUTS.md](docs/SHORTCUTS.md), or press
+`Ctrl+Shift+?` in the app.
 
 Settings are stored in `~/.config/bunny-deck/config.json`. It never contains passwords.
 
