@@ -23,6 +23,12 @@ _orig = sftp.ssh_sftp_argv
 sftp.ssh_sftp_argv = lambda profile: _orig(profile, extra_opts=["-F", SSHD.config])
 
 
+def visible_entries(path):
+    """What the pane should list (hidden files are off by default). May be
+    empty, e.g. a fresh home directory in CI."""
+    return sorted(n for n in os.listdir(path) if not n.startswith("."))
+
+
 def dialog():
     return find_top(CredentialDialog)
 
@@ -64,7 +70,8 @@ def test(app):
 
     yield lambda: R.cwd is not None
     check(R.cwd == os.path.expanduser("~"), f"connected; remote home listed ({R.cwd})")
-    check(len(R.names()) > 0 and not R.error_visible(), "real directory contents shown")
+    check(sorted(R.names()) == visible_entries(R.cwd) and not R.error_visible(),
+          "real directory contents shown")
 
     # --- cancelled login on a fresh connection ---------------------------
     prof2 = make_profile("Throwaway 2", host=throwaway_sshd.HOST_ALIAS, user="")

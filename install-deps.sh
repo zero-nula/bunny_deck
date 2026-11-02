@@ -44,7 +44,7 @@ case "$IDS" in
     if ! command -v python3 >/dev/null; then run $SUDO zypper --non-interactive install python3; fi
     py=$(python3 -c 'import sys; print(f"python{sys.version_info[0]}{sys.version_info[1]}")' 2>/dev/null || echo python3)
     pkgs=("$py-PyQt6" libqtermwidget6-2 qtermwidget-data openssh-clients
-          "$py-PyQt6-devel" "$py-pyqt-builder" "$py-sip6-devel" qtermwidget-devel
+          "$py-devel" "$py-PyQt6-devel" "$py-pyqt-builder" "$py-sip6-devel" qtermwidget-devel
           qt6-base-common-devel gcc-c++ make pkg-config)
     [ "$TESTS" = 1 ] && pkgs+=(openssh-server xorg-x11-server-Xvfb dbus-1 dejavu-fonts)
     run $SUDO zypper --non-interactive install --no-recommends "${pkgs[@]}"
@@ -53,13 +53,13 @@ case "$IDS" in
     version_at_least "${VERSION_ID:-0}" 43 \
       || echo "Note: Fedora 43 or newer is needed for QTermWidget 2 (Qt 6)." >&2
     pkgs=(python3-pyqt6 qtermwidget openssh-clients
-          python3-pyqt6-devel PyQt-builder sip6 qtermwidget-devel qt6-qtbase-devel
+          python3-devel python3-pyqt6-devel PyQt-builder sip6 qtermwidget-devel qt6-qtbase-devel
           gcc-c++ make pkgconf-pkg-config)
     [ "$TESTS" = 1 ] && pkgs+=(openssh-server xorg-x11-server-Xvfb dbus-daemon dejavu-sans-mono-fonts)
     run $SUDO dnf install -y "${pkgs[@]}"
     ;;
   *" arch "*)
-    pkgs=(python-pyqt6 qtermwidget openssh sip python-pyqt-builder qt6-base base-devel pkgconf)
+    pkgs=(python-pyqt6 qtermwidget openssh sip pyqt-builder qt6-base base-devel pkgconf)
     [ "$TESTS" = 1 ] && pkgs+=(xorg-server-xvfb dbus ttf-dejavu)
     run $SUDO pacman -S --needed --noconfirm "${pkgs[@]}"
     ;;
@@ -78,7 +78,7 @@ case "$IDS" in
     # (libqtermwidget6-2 pulls in its data package: qtermwidget-data on
     # Debian, qtermwidget6-data on Ubuntu.)
     pkgs=(python3-pyqt6 libqtermwidget6-2 openssh-client
-          pyqt6-dev sip-tools python3-pyqtbuild "$qtw_dev" qt6-base-dev qmake6
+          python3-dev pyqt6-dev sip-tools python3-pyqtbuild "$qtw_dev" qt6-base-dev qmake6
           build-essential pkg-config)
     [ "$TESTS" = 1 ] && pkgs+=(openssh-server xvfb dbus fonts-dejavu-core)
     run $SUDO apt-get update

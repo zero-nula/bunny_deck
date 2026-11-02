@@ -17,7 +17,7 @@ project-factory = "pyqtbuild:PyQtProject"
 sip-files-dir = "sip"
 # PyQt6's .sip files; pyqt-builder does not always find them by itself
 sip-include-dirs = ["@PYQT6_SIP_DIR@"]
-abi-version = "13"
+abi-version = "@SIP_ABI@"
 dunder-init = false
 
 [tool.sip.bindings.qtermwidget]

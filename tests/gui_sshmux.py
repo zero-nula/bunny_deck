@@ -48,7 +48,9 @@ def test(app):
     R = fm.right
     yield lambda: R.cwd is not None or find_top(CredentialDialog) is not None
     check(find_top(CredentialDialog) is None, "SCP opened without asking for credentials")
-    check(R.cwd == os.path.expanduser("~") and len(R.names()) > 0,
+    home = os.path.expanduser("~")
+    check(R.cwd == home and not R.error_visible()
+          and sorted(R.names()) == sorted(n for n in os.listdir(home) if not n.startswith(".")),
           f"remote files listed over the shared connection ({R.cwd})")
 
     win.show_terminals()
