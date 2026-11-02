@@ -38,12 +38,18 @@ command -v sip-build >/dev/null || die "sip-build was not found (install SIP 6 a
 SIP_ABI=$(python3 -c 'from PyQt6 import sip; v = sip.SIP_ABI_VERSION; print(f"{v >> 16}.{(v >> 8) & 255}")') \
   || die "could not read the ABI version of PyQt6.sip."
 
+# Features of the binding missing from older QTermWidget releases.
+DISABLED_FEATURES=""
+grep -q "autoHideMouseAfter" "$QTERMWIDGET_INCLUDE_DIR/qtermwidget.h" \
+  || DISABLED_FEATURES='"AUTO_HIDE_MOUSE"'
+
 BUILD=$(mktemp -d)
 trap 'rm -rf "$BUILD"' EXIT
 cp -r "$HERE/native/sip" "$BUILD/"
 sed -e "s|@PYQT6_SIP_DIR@|$PYQT6_SIP_DIR|" \
     -e "s|@QTERMWIDGET_INCLUDE_DIR@|$QTERMWIDGET_INCLUDE_DIR|" \
     -e "s|@SIP_ABI@|$SIP_ABI|" \
+    -e "s|@DISABLED_FEATURES@|$DISABLED_FEATURES|" \
     "$HERE/native/pyproject.toml.in" > "$BUILD/pyproject.toml"
 cd "$BUILD"
 sip-build --no-make --build-dir build --qmake "$QMAKE" >/dev/null

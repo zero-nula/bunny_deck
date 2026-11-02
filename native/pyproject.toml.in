@@ -26,3 +26,4 @@ include-dirs = ["@QTERMWIDGET_INCLUDE_DIR@"]
 libraries = ["qtermwidget6"]
 qmake-QT = ["widgets"]
 pep484-pyi = false
+disabled-features = [@DISABLED_FEATURES@]

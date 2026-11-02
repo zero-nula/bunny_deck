@@ -226,7 +226,8 @@ class TerminalPanel(QWidget):
         term.setBlinkingCursor(False)
         term.setFlowControlEnabled(False)
         term.setConfirmMultilinePaste(False)
-        term.autoHideMouseAfter(2000)
+        if hasattr(term, "autoHideMouseAfter"):  # not in older QTermWidget (e.g. 2.1)
+            term.autoHideMouseAfter(2000)
         term.setMargin(2)
         term.setTerminalSizeHint(False)  # no "Size: 80 x 24" overlay while resizing
         # Keep the display (and the last output, e.g. why ssh ended) when the

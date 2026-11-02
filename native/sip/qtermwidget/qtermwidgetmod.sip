@@ -5,6 +5,10 @@
 
 %Import QtWidgets/QtWidgetsmod.sip
 
+// Parts of the API that older QTermWidget releases lack; build-native.sh
+// disables a feature when the installed qtermwidget.h does not have it.
+%Feature AUTO_HIDE_MOUSE
+
 class QTermWidget : QWidget
 {
 %TypeHeaderCode
@@ -62,7 +66,9 @@ public:
     int getMargin() const;
     void setBoldIntense(bool boldIntense);
     void setConfirmMultilinePaste(bool confirmMultilinePaste);
+%If (AUTO_HIDE_MOUSE)
     void autoHideMouseAfter(int delay);
+%End
     void setTerminalSizeHint(bool enabled);
 
 signals:

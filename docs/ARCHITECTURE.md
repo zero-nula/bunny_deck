@@ -68,6 +68,11 @@ PyQt6's `.sip` files, QTermWidget's headers and Qt 6's `qmake` on the
 system, fills them into `pyproject.toml.in`, runs `sip-build` and `make` in a
 temporary directory and installs the resulting module into `bunnydeck/`.
 
+`build-native.sh` also takes the SIP ABI version from the installed
+`PyQt6.sip`, and disables optional parts of the API (SIP `%Feature`) that
+an older QTermWidget lacks: Debian 13's 2.1 has no `autoHideMouseAfter`,
+so there the mouse pointer simply stays visible while typing.
+
 The module is tied to the installed libqtermwidget6 and PyQt6 ABI. After an
 update changes either, importing it fails and `bunnydeck/native.py` shows a
 message asking to run `./build-native.sh` again.
