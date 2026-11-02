@@ -28,11 +28,14 @@ without one; `install.sh` compiles it against the installed library.
 
 | Distribution | Status |
 |---|---|
-| openSUSE Tumbleweed | Developed and used daily |
-| Fedora 43 and newer | Built and tested in CI |
-| Arch Linux (and derivatives) | Built and tested in CI |
-| Debian 13 (trixie) and newer | Built and tested in CI |
-| Ubuntu 26.04 and newer | Built and tested in CI |
+| openSUSE Tumbleweed (KDE Plasma) | Tested — developed on it and used every day |
+| Ubuntu 26.04 LTS (GNOME) | Tested — used every day |
+| Fedora 43 and newer | Supported; covered by the automated tests in CI |
+| Arch Linux (and derivatives) | Supported; covered by the automated tests in CI |
+| Debian 13 (trixie) and newer | Supported; covered by the automated tests in CI |
+
+If you use Bunny Deck on Fedora, Arch or Debian, a short note in an issue
+saying it works (or what did not) is very welcome.
 
 Older releases (for example Ubuntu 24.04 or Debian 12) ship QTermWidget only
 for Qt 5 and are not supported.
