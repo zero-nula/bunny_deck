@@ -140,19 +140,20 @@ The other toolbar buttons are icons; hover over one to see its name and shortcut
   You can drag the dividers. Adding or closing a terminal re-balances the layout.
 - **Keyboard icon** (top right): the list of keyboard shortcuts.
 - **Terminal header**: shows the name and user@host. The dot is green while connected; other states (connecting, disconnected) are also written out. The terminal you are typing in has a thin line over its header in the connection's colour.
-  Move the mouse over a header to show its buttons: **Move** (arrows), **Files** (folder), **Background** (picture). **✕** closes the terminal.
+  Move the mouse over a header to show its buttons: **Move** (arrows) and **Background** (picture). **✕** closes the terminal. Right-click in a terminal for Copy, Paste and **Files for this connection**.
 - **Snap layouts**, as in Windows 11: click **Move** (the arrows in a terminal's header), the layout button in the toolbar (next to the two split buttons) or press Ctrl+Shift+L. A popup shows layouts (two or three columns, one big terminal with two or three beside it, a grid, …); click the part of a layout where the terminal should go, and the other terminals fill the rest.
 - **Drag a terminal by its header** onto another one: a blue preview shows where it will land. Near an edge it goes beside (left, right, above, below); in the middle the two swap places.
 - **Move → Next to a terminal…** places the terminal left of, right of, above or below another terminal, so you can build any mix of rows and columns.
   Sessions keep running; nothing reconnects. The layout buttons re-arrange all terminals uniformly again.
 - **Copy and paste**: Ctrl+Shift+C / Ctrl+Shift+V, Shift+Insert, middle-click, or the right-click menu.
-- **Files** (the folder in the header) opens the file manager inside the main window. The terminals keep running; switch back with **← Terminals** or the **Files** toggle.
-  - Each pane has its own source selector (Local or any open or saved connection), Up, Home, an editable path, Reload, New Folder and a hidden-files toggle.
-  - **Copy →** and **← Copy** copy the selected files into the other pane's current folder. You can also drag files between panes, or from your file manager into a pane.
+- **Files** (top right in the toolbar, or Ctrl+Shift+F) opens the file manager inside the main window, with the current terminal's computer on the right. The terminals keep running; switch back with **Files** again or **Back to terminals**.
+  - Each side has its own source (This computer, or any open or saved connection, with its colour), Up, Home, the folder as clickable parts (click the free space after them to type a path; Esc goes back), Reload, and icons for hidden files, New Folder and Delete.
+  - Files show the icon of their type from your desktop's icon theme; dates read like *Today 14:32*.
+  - The round **→** and **←** buttons in the middle copy the selected files into the other pane's current folder. You can also drag files between panes, or from your file manager into a pane.
   - An existing target is never silently replaced: you choose Replace, Skip, Replace All or Cancel.
   - **Folders** are copied with everything in them, in every direction (also Remote ↔ Remote). If the folder already exists in the target, you are asked once whether to copy into it; files that exist in both are then asked about as above.
   - Symbolic links and special files (pipes, sockets, devices) inside folders are not copied; the summary says how many were left out.
-  - **Delete** (button or the Delete key) removes the selected files and folders, folders with everything in them. It always asks first, showing how many files and folders will go; **Cancel** is the default. Deleting is permanent (there is no trash). A symbolic link is removed itself, never what it points to, and the root or your home folder (or a folder containing it) is never deleted.
+  - **Delete** (the bin icon or the Delete key) removes the selected files and folders, folders with everything in them. It always asks first, showing how many files and folders will go; **Cancel** is the default. Deleting is permanent (there is no trash). A symbolic link is removed itself, never what it points to, and the root or your home folder (or a folder containing it) is never deleted.
 - **Background**: pick a background colour, opacity and an optional image (Fill, Fit, Stretch or Center) for the profile.
   The change applies live to every session of that profile. **Save** stores it; **Reset to Default** restores the default.
   The chosen image is copied to `~/.config/bunny-deck/backgrounds/`, so it stays even if the original is moved.

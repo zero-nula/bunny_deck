@@ -42,7 +42,7 @@ def test(app):
     prof = make_profile("Throwaway", host=throwaway_sshd.HOST_ALIAS, user="")
     panel = win.open_profile(prof, argv=local_shell_argv())
     yield lambda: panel.child_pid
-    panel.scp_btn.click()
+    panel.scpRequested.emit(panel)
     fm = win.file_manager
     R = fm.right
 
@@ -77,7 +77,7 @@ def test(app):
     prof2 = make_profile("Throwaway 2", host=throwaway_sshd.HOST_ALIAS, user="")
     p2 = win.open_profile(prof2, argv=local_shell_argv())
     yield lambda: p2.child_pid
-    p2.scp_btn.click()
+    p2.scpRequested.emit(p2)
     yield lambda: dialog() is not None
     d3 = dialog()
     check(d3 is not None and not d3.confirm, "known host now: goes straight to secret prompt")

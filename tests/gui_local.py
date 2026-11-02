@@ -37,7 +37,7 @@ def test(app):
     check(cmdline(p.child_pid) == ["/bin/sh"], f"process cmdline {cmdline(p.child_pid)}")
     check(os.readlink(f"/proc/{p.child_pid}/cwd") == os.path.realpath(HOME),
           "working directory is $HOME")
-    check(p.scp_btn.isVisible(), "SCP button shown for a local terminal")
+    check(win.files_btn.isVisible(), "Files button in the toolbar")
     check(p.target_label.text() == "local", "header shows 'local'")
 
     p.terminal.sendText("echo LOCAL-$((40+2))\n")
@@ -50,7 +50,7 @@ def test(app):
     os.mkdir(src_dir)
     with open(os.path.join(src_dir, "a.txt"), "w") as f:
         f.write("local copy\n")
-    p.scp_btn.click()
+    p.scpRequested.emit(p)
     fm = win.file_manager
     check(fm is not None and win.current_view() == "files", "SCP opens the file manager")
     check(fm.left.source_id == LOCAL_ID and fm.right.source_id == LOCAL_ID,
@@ -69,7 +69,7 @@ def test(app):
     s = win.open_profile(make_profile("Refused", host="127.0.0.1", port=1))
     check(s.argv == ["/usr/bin/ssh", *sshmux.master_opts(), "-p", "1", "-l", "tester", "--",
                      "127.0.0.1"], f"ssh argv: shared connection + target ({s.argv})")
-    check(s.scp_btn.isVisible(), "SCP button visible for an SSH terminal")
+    check(not hasattr(s, "scp_btn"), "no Files button in the terminal header")
     win.open_file_manager(s)
     check(win.current_view() == "files", "file manager opens for an SSH terminal")
     check(fm.right.source_id == s.profile.id, "SSH terminal's SCP selects its host")

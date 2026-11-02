@@ -290,7 +290,7 @@ QPushButton#recentRow:hover {
     background-color: #1d2a44;
 }
 
-#emptyState, #fmRoot, QStackedWidget > QWidget#fmRoot {
+#emptyState, #fmRoot, QStackedWidget > QWidget#fmRoot, #fmTop {
     background-color: #0a0b0d;
 }
 
@@ -402,31 +402,6 @@ QSplitter::handle:hover {
     background: transparent;
 }
 
-/* File manager */
-#fmPane {
-    background-color: #0a0b0d;
-    border: 1px solid #1f232a;
-}
-
-#fmHeader, #fmStatusbar {
-    background-color: #121418;
-}
-
-#fmPane QTreeWidget {
-    background-color: #0a0b0d;
-    alternate-background-color: #0d0f12;
-    border: none;
-}
-
-#fmPane QTreeWidget::item:selected {
-    background-color: #24324d;
-    color: #ffffff;
-}
-
-#fmStatusbar QLabel {
-    color: #6b7280;
-}
-
 /* Broadcast: ticked terminals and the toolbar button turn orange. */
 #termPanel[broadcast="true"], #termPanel[broadcast="true"][active="true"] {
     border-color: #e8913a;
@@ -532,4 +507,142 @@ QPushButton#deleteBtn:hover {
 
 QPushButton#snapMore {
     text-align: left;
+}
+
+/* ----- File manager ------------------------------------------------------- */
+
+#fmTop {
+    background-color: #0a0b0d;
+}
+
+#fmTitle {
+    font-size: 18px;
+    font-weight: bold;
+    color: #e6e9ef;
+}
+
+#fmPane {
+    background-color: #0d0f13;
+    border: 1px solid #1f232a;
+    border-radius: 10px;
+}
+
+#fmPaneHeader {
+    background-color: transparent;
+    border-bottom: 1px solid #1f232a;
+}
+
+#fmPane QToolButton#fmTool, #fmPane QToolButton#deleteBtn {
+    border: none;
+    border-radius: 6px;
+    padding: 4px;
+    background: transparent;
+}
+
+#fmPane QToolButton#fmTool:hover, #fmPane QToolButton#deleteBtn:hover {
+    background-color: #1d2128;
+}
+
+#fmPane QToolButton#fmTool:checked {
+    background-color: #16233b;
+}
+
+#fmPane QToolButton#deleteBtn:hover {
+    background-color: #8a2d2b;
+}
+
+#pathBar #crumbs {
+    background-color: #0a0b0d;
+    border: 1px solid #262b33;
+    border-radius: 6px;
+}
+
+#pathBar #crumbs:hover {
+    border-color: #323844;
+}
+
+QToolButton#crumb {
+    border: none;
+    border-radius: 4px;
+    padding: 2px 5px;
+    color: #9aa3b2;
+    background: transparent;
+}
+
+QToolButton#crumb:hover {
+    background-color: #1d2128;
+    color: #ffffff;
+}
+
+QToolButton#crumb[current="true"] {
+    color: #e6e9ef;
+    font-weight: bold;
+}
+
+#crumbSep {
+    color: #4b5260;
+    padding: 0 1px;
+}
+
+#fmPane QTreeWidget {
+    background-color: transparent;
+    border: none;
+    outline: 0;
+}
+
+#fmPane QTreeWidget::item {
+    padding: 3px 2px;
+    border: none;
+}
+
+#fmPane QTreeWidget::item:hover {
+    background-color: #15181e;
+}
+
+#fmPane QTreeWidget::item:selected {
+    background-color: #1a2a48;
+    color: #ffffff;
+}
+
+#fmPane QHeaderView::section {
+    background-color: transparent;
+    color: #6b7280;
+    border: none;
+    border-bottom: 1px solid #1f232a;
+    padding: 4px 6px;
+    font-size: 11px;
+}
+
+QToolButton#copyBtn {
+    background-color: #2f5fbf;
+    border: 1px solid #3f70d4;
+    border-radius: 19px;
+    min-width: 36px;
+    min-height: 36px;
+    max-width: 36px;
+    max-height: 36px;
+}
+
+QToolButton#copyBtn:hover {
+    background-color: #3a6cd0;
+}
+
+QToolButton#copyBtn:disabled {
+    background-color: #1a1d23;
+    border-color: #262b33;
+}
+
+#fmStatusbar {
+    background-color: #0a0b0d;
+}
+
+#fmProgress {
+    border: none;
+    border-radius: 3px;
+    background-color: #1d2128;
+}
+
+#fmProgress::chunk {
+    border-radius: 3px;
+    background-color: #5b8def;
 }

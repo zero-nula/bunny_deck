@@ -208,13 +208,11 @@ class TerminalPanel(QWidget):
         self.move_menu.aboutToShow.connect(lambda: self.moveMenuRequested.emit(self, self.move_menu))
         self._drag_start = None
         self._dragging = False
-        self.scp_btn = button("folder", "SCP", "Files: open the file manager for this "
-                              "connection (Ctrl+Shift+F)", self.scpRequested)
         self.appearance_btn = button("image", "Background", "Background: colour, opacity and "
                                      "image of this terminal", self.appearanceRequested)
-        # Move, files and background show while the mouse is over the header
+        # Move and background show while the mouse is over the header
         # (faded in, so the header never shifts); close is always there.
-        self.tools = (self.move_btn, self.scp_btn, self.appearance_btn)
+        self.tools = (self.move_btn, self.appearance_btn)
         self._hovered = False
         self._tool_effects = []
         for b in self.tools:
@@ -474,6 +472,11 @@ class TerminalPanel(QWidget):
         paste.triggered.connect(self.paste)
         menu.addAction(copy)
         menu.addAction(paste)
+        menu.addSeparator()
+        files = QAction("Files for this connection", menu)
+        files.setShortcut(QKeySequence("Ctrl+Shift+F"))
+        files.triggered.connect(lambda: self.scpRequested.emit(self))
+        menu.addAction(files)
         if not self.profile.is_local:
             menu.addSeparator()
             menu.addAction("Set up key login…").triggered.connect(

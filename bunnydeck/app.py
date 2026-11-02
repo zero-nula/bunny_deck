@@ -257,11 +257,11 @@ class MainWindow(QMainWindow):
         h.addStretch(1)
 
         self.files_btn = self._tool_button(
-            "folder", "Files", "Show the file manager (terminals keep running) — Ctrl+Shift+F",
-            self._on_files_toggled, checkable=True)
+            "folder", "Files", "File manager for the current terminal's computer (the "
+            "terminals keep running) — Ctrl+Shift+F", self._on_files_toggled, checkable=True)
+        self.files_btn.setObjectName("filesBtn")
         self.files_btn.setText("Files")
         self.files_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.files_btn.hide()
         h.addWidget(self.files_btn)
         self.help_btn = self._tool_button("keyboard", "Keyboard shortcuts", "Ctrl+Shift+?",
                                           lambda: self.run_shortcut("help"))
@@ -527,7 +527,7 @@ class MainWindow(QMainWindow):
                 self.show_terminals()
                 if self.active_panel is not None:
                     self.active_panel.focus_terminal()
-            elif panel is not None:
+            else:
                 self.open_file_manager(panel)
         elif self.current_view() != "terminals" or panel is None:
             return  # the rest acts on terminals, which are not shown
@@ -689,19 +689,28 @@ class MainWindow(QMainWindow):
 
     # ----- file manager ---------------------------------------------------
 
-    def open_file_manager(self, panel):
+    def open_file_manager(self, panel=None):
+        """Shows the file manager with panel's computer on the right (the
+        active terminal's, or this computer's without one)."""
         from .filemanager import FileManager
 
         if self.file_manager is None:
             self.file_manager = FileManager(self)
             self.stack.addWidget(self.file_manager)
-            self.files_btn.show()
-        self.file_manager.open_for(panel.profile)
+        panel = panel or self.active_panel
+        self.file_manager.open_for(panel.profile if panel is not None else self.local_profile)
+        # (Without the toggled signal, which would open it again for the
+        # active terminal instead of panel.)
+        self.files_btn.blockSignals(True)
         self.files_btn.setChecked(True)
+        self.files_btn.blockSignals(False)
         self._update_view()
 
     def _on_files_toggled(self, on):
-        self._update_view()
+        if on and self.current_view() != "files":
+            self.open_file_manager()
+        else:
+            self._update_view()
 
     def show_terminals(self):
         if self.files_btn.isChecked():

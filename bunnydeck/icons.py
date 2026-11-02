@@ -162,11 +162,78 @@ def _layouts(p):  # a snap layout: one big zone, two small ones
     p.drawRoundedRect(QRectF(13, 13, 7.5, 6), 1.8, 1.8)
 
 
+def _folder_plus(p):
+    _folder(p)
+    p.drawLine(QPointF(12, 11), QPointF(12, 16.5))
+    p.drawLine(QPointF(9.25, 13.75), QPointF(14.75, 13.75))
+
+
+def _trash(p):
+    p.drawLine(QPointF(4.5, 7), QPointF(19.5, 7))
+    p.drawLine(QPointF(9.5, 7), QPointF(10, 4.5))
+    p.drawLine(QPointF(10, 4.5), QPointF(14, 4.5))
+    p.drawLine(QPointF(14, 4.5), QPointF(14.5, 7))
+    path = QPainterPath(QPointF(6.5, 7))
+    path.lineTo(QPointF(7.5, 19.5))
+    path.lineTo(QPointF(16.5, 19.5))
+    path.lineTo(QPointF(17.5, 7))
+    p.drawPath(path)
+    p.drawLine(QPointF(10.5, 10.5), QPointF(10.5, 16))
+    p.drawLine(QPointF(13.5, 10.5), QPointF(13.5, 16))
+
+
+def _eye(p):
+    path = QPainterPath(QPointF(3, 12))
+    path.quadTo(QPointF(12, 3), QPointF(21, 12))
+    path.quadTo(QPointF(12, 21), QPointF(3, 12))
+    p.drawPath(path)
+    p.drawEllipse(QPointF(12, 12), 2.8, 2.8)
+
+
+def _arrow_up(p):
+    p.drawLine(QPointF(12, 19), QPointF(12, 5))
+    p.drawLine(QPointF(12, 5), QPointF(6.5, 10.5))
+    p.drawLine(QPointF(12, 5), QPointF(17.5, 10.5))
+
+
+def _arrow_right(p):
+    p.drawLine(QPointF(5, 12), QPointF(19, 12))
+    p.drawLine(QPointF(19, 12), QPointF(13.5, 6.5))
+    p.drawLine(QPointF(19, 12), QPointF(13.5, 17.5))
+
+
+def _arrow_left(p):
+    p.drawLine(QPointF(19, 12), QPointF(5, 12))
+    p.drawLine(QPointF(5, 12), QPointF(10.5, 6.5))
+    p.drawLine(QPointF(5, 12), QPointF(10.5, 17.5))
+
+
+def _home(p):
+    path = QPainterPath(QPointF(4, 11.5))
+    path.lineTo(QPointF(12, 4.5))
+    path.lineTo(QPointF(20, 11.5))
+    p.drawPath(path)
+    path = QPainterPath(QPointF(6.5, 9.5))
+    path.lineTo(QPointF(6.5, 19.5))
+    path.lineTo(QPointF(17.5, 19.5))
+    path.lineTo(QPointF(17.5, 9.5))
+    p.drawPath(path)
+    p.drawRect(QRectF(10.3, 14, 3.4, 5.5))
+
+
+def _refresh(p):
+    p.drawArc(QRectF(5, 5, 14, 14), 60 * 16, 270 * 16)
+    p.drawLine(QPointF(15.5, 6), QPointF(19.2, 5.2))
+    p.drawLine(QPointF(15.5, 6), QPointF(16.2, 9.8))
+
+
 DRAW = {
     "plus": _plus, "terminal": _terminal, "saved": _saved, "ai": _ai, "radar": _radar,
     "broadcast": _broadcast, "split-v": _split_v, "split-h": _split_h, "folder": _folder,
     "keyboard": _keyboard, "sidebar": _sidebar, "move": _move, "image": _image,
     "close": _close, "import": _import, "search": _search, "layouts": _layouts,
+    "folder-plus": _folder_plus, "trash": _trash, "eye": _eye, "arrow-up": _arrow_up,
+    "arrow-right": _arrow_right, "arrow-left": _arrow_left, "home": _home, "refresh": _refresh,
 }
 
 

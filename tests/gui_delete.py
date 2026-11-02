@@ -53,7 +53,7 @@ def test(app):
     prof = app.config.add(make_profile("Ubuntu", host="ubuntu.invalid"))
     t = win.open_profile(prof, argv=local_shell_argv())
     yield lambda: t.child_pid
-    t.scp_btn.click()
+    t.scpRequested.emit(t)
     fm = win.file_manager
     R = fm.right
     yield lambda: R.cwd == ROOT and "project" in R.names()

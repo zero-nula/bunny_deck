@@ -1,22 +1,22 @@
 """Integrated dual-pane file manager (Local / any SSH connection per pane).
 
 Network work runs on worker threads; results are delivered to the UI thread
-with mainthread.call_soon. There is intentionally no delete action.
+with mainthread.call_soon. Delete always asks first.
 """
 
 import json
 import threading
 import time
 
-from PyQt6.QtCore import QMimeData, Qt, pyqtSignal
-from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import QEvent, QMimeData, QMimeDatabase, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QIcon
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView,
-    QInputDialog, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QToolButton,
-    QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
+    QInputDialog, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget,
+    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import sftp
+from . import icons, sftp, theme
 from .connections import ConnectionPool, run_on_main_sync
 from .dialogs import CredentialDialog
 from .mainthread import call_soon
@@ -57,6 +57,121 @@ def _icon(name, fallback):
     return icon if not icon.isNull() else QIcon.fromTheme(fallback)
 
 
+_mimes = QMimeDatabase()
+_icon_cache = {}
+
+
+def file_icon(name):
+    """The desktop's icon for a file name (by type), e.g. a script, an image."""
+    mime = _mimes.mimeTypeForFile(name, QMimeDatabase.MatchMode.MatchExtension)
+    key = mime.name()
+    if key not in _icon_cache:
+        icon = QIcon.fromTheme(mime.iconName())
+        if icon.isNull():
+            icon = QIcon.fromTheme(mime.genericIconName())
+        if icon.isNull():
+            icon = _icon("text-x-generic", "text-x-generic-symbolic")
+        _icon_cache[key] = icon
+    return _icon_cache[key]
+
+
+def friendly_time(mtime, now=None):
+    """Today 14:32 / Yesterday 09:10 / 3 Nov 14:32 / 3 Nov 2024."""
+    if not mtime:
+        return ""
+    now = now or time.time()
+    t = time.localtime(mtime)
+    today = time.localtime(now)
+    if t.tm_year == today.tm_year and t.tm_yday == today.tm_yday:
+        return time.strftime("Today %H:%M", t)
+    if t.tm_year == today.tm_year and t.tm_yday == today.tm_yday - 1:
+        return time.strftime("Yesterday %H:%M", t)
+    if t.tm_year == today.tm_year:
+        return f"{t.tm_mday} {time.strftime('%b %H:%M', t)}"
+    return f"{t.tm_mday} {time.strftime('%b %Y', t)}"
+
+
+class PathBar(QStackedWidget):
+    """The folder as clickable parts (/ › home › lenny › projects); clicking
+    the free space after them, or pressing Ctrl+L, edits it as text."""
+
+    navigate = pyqtSignal(str)
+
+    def __init__(self, entry, parent=None):
+        super().__init__(parent)
+        self.setObjectName("pathBar")
+        self.entry = entry
+        self.path = ""
+        self.crumbs = QFrame()
+        self.crumbs.setObjectName("crumbs")
+        self.crumbs.setCursor(Qt.CursorShape.IBeamCursor)
+        self.crumbs.installEventFilter(self)
+        self.row = QHBoxLayout(self.crumbs)
+        self.row.setContentsMargins(4, 0, 4, 0)
+        self.row.setSpacing(0)
+        self.addWidget(self.crumbs)
+        self.addWidget(entry)
+        entry.installEventFilter(self)
+        entry.editingFinished.connect(self.show_crumbs)
+        self.setFixedHeight(30)
+
+    def set_path(self, path):
+        self.path = path or ""
+        self.entry.setText(self.path)
+        while self.row.count():
+            item = self.row.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        parts = [p for p in self.path.split("/") if p]
+        targets = [("/", "/")]
+        acc = ""
+        for part in parts:
+            acc += "/" + part
+            targets.append((part, acc))
+        shown = targets if len(targets) <= 6 else [targets[0], ("…", None)] + targets[-4:]
+        for i, (label, target) in enumerate(shown):
+            if i > 0:
+                sep = QLabel("›")
+                sep.setObjectName("crumbSep")
+                self.row.addWidget(sep)
+            b = QToolButton()
+            b.setObjectName("crumb")
+            b.setText(label)
+            b.setAutoRaise(True)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            last = i == len(shown) - 1
+            b.setProperty("current", last)
+            if target is None:
+                b.setEnabled(False)
+            else:
+                b.setToolTip(target)
+                b.clicked.connect(lambda _=False, t=target: self.navigate.emit(t))
+            self.row.addWidget(b)
+        self.row.addStretch(1)
+        if self.currentWidget() is not self.entry or not self.entry.hasFocus():
+            self.setCurrentWidget(self.crumbs)
+
+    def edit(self):
+        self.entry.setText(self.path)
+        self.setCurrentWidget(self.entry)
+        self.entry.setFocus()
+        self.entry.selectAll()
+
+    def show_crumbs(self):
+        self.setCurrentWidget(self.crumbs)
+
+    def eventFilter(self, obj, event):
+        if obj is self.crumbs and event.type() == QEvent.Type.MouseButtonPress:
+            self.edit()
+            return True
+        if obj is self.entry and event.type() == QEvent.Type.KeyPress \
+                and event.key() == Qt.Key.Key_Escape:
+            self.entry.setText(self.path)
+            self.show_crumbs()
+            return True
+        return False
+
+
 class FileList(QTreeWidget):
     """File list with drag (to the other pane) and drop (from the other pane
     or from local file managers such as Dolphin)."""
@@ -78,7 +193,9 @@ class FileList(QTreeWidget):
         self.setHeaderLabels(["Name", "Size", "Modified"])
         self.setRootIsDecorated(False)
         self.setUniformRowHeights(True)
-        self.setAlternatingRowColors(True)
+        self.setAlternatingRowColors(False)
+        self.setIconSize(QSize(18, 18))
+        self.setMouseTracking(True)
         self.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
@@ -153,55 +270,61 @@ class FilePane(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         header = QWidget()
-        header.setObjectName("fmHeader")
+        header.setObjectName("fmPaneHeader")
         header.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hv = QVBoxLayout(header)
-        hv.setContentsMargins(4, 4, 4, 4)
-        hv.setSpacing(4)
+        hv.setContentsMargins(8, 8, 8, 6)
+        hv.setSpacing(6)
+
+        def tool(icon_name, tip, slot=None, checkable=False, name="fmTool"):
+            b = QToolButton()
+            b.setObjectName(name)
+            b.setIcon(icons.icon(icon_name))
+            b.setIconSize(QSize(17, 17))
+            b.setToolTip(tip)
+            b.setCheckable(checkable)
+            b.setAutoRaise(True)
+            if slot is not None:
+                (b.toggled if checkable else b.clicked).connect(slot)
+            return b
+
         row1 = QHBoxLayout()
+        row1.setSpacing(4)
         self.source = QComboBox()
-        self.source.setToolTip("Source/target for this pane")
+        self.source.setObjectName("fmSource")
+        self.source.setIconSize(QSize(12, 12))
+        self.source.setToolTip("Which computer this side shows")
         self.source.currentIndexChanged.connect(self._on_source_changed)
         row1.addWidget(self.source, 1)
         self.busy = QLabel("")
         self.busy.setObjectName("dimLabel")
         row1.addWidget(self.busy)
-        self.hidden_btn = QToolButton()
-        self.hidden_btn.setText(".*")
-        self.hidden_btn.setCheckable(True)
-        self.hidden_btn.setToolTip("Show hidden files")
-        self.hidden_btn.toggled.connect(lambda *_: self.refresh())
-        row1.addWidget(self.hidden_btn)
-        self.newdir_btn = QPushButton("New Folder")
-        self.newdir_btn.clicked.connect(self.new_folder)
-        row1.addWidget(self.newdir_btn)
-        self.delete_btn = QPushButton("Delete")
-        self.delete_btn.setObjectName("deleteBtn")
-        self.delete_btn.setToolTip("Delete the selected files and folders (asks first)")
-        self.delete_btn.clicked.connect(lambda: self.fm.delete_selection(self))
-        row1.addWidget(self.delete_btn)
+        self.hidden_btn = tool("eye", "Show hidden files", lambda *_: self.refresh(),
+                               checkable=True)
+        self.newdir_btn = tool("folder-plus", "New folder", self.new_folder)
+        self.delete_btn = tool("trash", "Delete the selected files and folders (Delete key; "
+                               "asks first)", lambda: self.fm.delete_selection(self),
+                               name="deleteBtn")
+        # The names, for screen readers and tests; only the icons show.
+        for b, text in ((self.hidden_btn, "Hidden files"), (self.newdir_btn, "New Folder"),
+                        (self.delete_btn, "Delete")):
+            b.setText(text)
+            row1.addWidget(b)
         hv.addLayout(row1)
 
         row2 = QHBoxLayout()
-
-        def tool(icon, fallback, text, tip, slot):
-            b = QToolButton()
-            b.setIcon(_icon(icon, fallback))
-            if b.icon().isNull():
-                b.setText(text)
-            b.setToolTip(tip)
-            b.clicked.connect(slot)
-            row2.addWidget(b)
-            return b
-
-        tool("go-up", "go-up-symbolic", "↑", "Parent directory", self.go_up)
-        tool("go-home", "go-home-symbolic", "⌂", "Home directory", self.go_home)
+        row2.setSpacing(2)
+        row2.addWidget(tool("arrow-up", "Parent folder", self.go_up))
+        row2.addWidget(tool("home", "Home folder", self.go_home))
         self.path_entry = QLineEdit()
-        self.path_entry.setToolTip("Type a path and press Enter")
+        self.path_entry.setObjectName("pathEntry")
+        self.path_entry.setToolTip("Type a path and press Enter (Esc goes back)")
         self.path_entry.returnPressed.connect(self._on_path_activate)
-        row2.addWidget(self.path_entry, 1)
-        tool("view-refresh", "view-refresh-symbolic", "⟳", "Reload (or reconnect)",
-             lambda: self.refresh(reconnect=True))
+        self.path_bar = PathBar(self.path_entry)
+        self.path_bar.navigate.connect(lambda path: self.backend and self.load(path))
+        row2.addWidget(self.path_bar, 1)
+        row2.addWidget(tool("refresh", "Reload (or reconnect)",
+                            lambda: self.refresh(reconnect=True)))
         hv.addLayout(row2)
 
         self.error_label = QLabel()
@@ -225,12 +348,12 @@ class FilePane(QWidget):
     # ----- sources --------------------------------------------------------
 
     def set_sources(self, sources):
-        """sources: list of (id, label). Keeps the current selection."""
+        """sources: list of (id, label, icon). Keeps the current selection."""
         current = self.source_id
         self._updating = True
         self.source.clear()
-        for sid, label in sources:
-            self.source.addItem(label, sid)
+        for sid, label, icon in sources:
+            self.source.addItem(icon, label, sid)
         idx = self.source.findData(current) if current is not None else -1
         self.source.setCurrentIndex(idx)
         self._updating = False
@@ -311,7 +434,7 @@ class FilePane(QWidget):
             if seq != self._load_seq or backend is not self.backend:
                 return
             self.set_busy(False)
-            self.path_entry.setText(path)
+            self.path_bar.set_path(path)
             self.view.clear()
             self.cwd = path
             if err is not None:
@@ -325,17 +448,21 @@ class FilePane(QWidget):
             show_hidden = self.hidden_btn.isChecked()
             items = sorted(items, key=lambda it: (not it.is_dir, it.name.lower()))
             dir_icon = _icon("folder", "folder-symbolic")
-            file_icon = _icon("text-x-generic", "text-x-generic-symbolic")
             link_icon = _icon("emblem-symbolic-link", "inode-symlink")
+            dim = QColor(theme.DIM)
             rows = []
             for it in items:
                 if not show_hidden and it.name.startswith("."):
                     continue
-                mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(it.mtime)) \
-                    if it.mtime else ""
+                mtime = friendly_time(it.mtime)
                 row = QTreeWidgetItem([it.name, "" if it.is_dir else human_size(it.size), mtime])
                 row.setIcon(0, dir_icon if it.is_dir else (link_icon if it.is_link
-                                                           else file_icon))
+                                                           else file_icon(it.name)))
+                if it.mtime:
+                    row.setToolTip(2, time.strftime("%Y-%m-%d %H:%M:%S",
+                                                    time.localtime(it.mtime)))
+                for col in (1, 2):
+                    row.setForeground(col, dim)
                 row.setData(0, ROLE_ISDIR, it.is_dir)
                 row.setTextAlignment(1, Qt.AlignmentFlag.AlignRight |
                                      Qt.AlignmentFlag.AlignVCenter)
@@ -469,35 +596,55 @@ class FileManager(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         top = QWidget()
-        top.setObjectName("fmHeader")
+        top.setObjectName("fmTop")
         top.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         th = QHBoxLayout(top)
-        th.setContentsMargins(6, 4, 6, 4)
-        back = QPushButton("← Terminals")
-        back.setToolTip("Back to the terminals (they kept running)")
+        th.setContentsMargins(14, 10, 14, 6)
+        title = QLabel("Files")
+        title.setObjectName("fmTitle")
+        hint = QLabel("Copy between this computer and your servers, or between two servers. "
+                      "Files are copied, never moved; Delete always asks first.")
+        hint.setObjectName("dimLabel")
+        hint.setWordWrap(True)
+        back = QPushButton("Back to terminals")
+        back.setObjectName("fmBack")
+        back.setIcon(icons.icon("terminal"))
+        back.setToolTip("Back to the terminals (they kept running) — Ctrl+Shift+F")
         back.clicked.connect(self.window.show_terminals)
+        th.addWidget(title)
+        th.addSpacing(12)
+        th.addWidget(hint, 1)
         th.addWidget(back)
-        title = QLabel("<b>File Transfer</b>&nbsp;&nbsp;<small>Select a source and a target "
-                       "for each side. Files are copied, never moved; Delete always asks first.</small>")
-        th.addWidget(title, 1)
 
         self.left = FilePane(self, "left")
         self.right = FilePane(self, "right")
         mid = QVBoxLayout()
-        mid.setContentsMargins(6, 6, 6, 6)
+        mid.setContentsMargins(8, 6, 8, 6)
+        mid.setSpacing(8)
         mid.addStretch(1)
-        self.to_right = QPushButton("Copy →")
-        self.to_right.setToolTip("Copy the selected files from the left pane into the right "
-                                 "pane's folder")
+        self.to_right = QToolButton()
+        self.to_right.setObjectName("copyBtn")
+        self.to_right.setIcon(icons.icon("arrow-right", color="#ffffff"))
+        self.to_right.setIconSize(QSize(20, 20))
+        self.to_right.setToolTip("Copy the selected files from the left side into the folder "
+                                 "on the right")
         self.to_right.clicked.connect(lambda: self.copy_selection(self.left, self.right))
-        self.to_left = QPushButton("← Copy")
-        self.to_left.setToolTip("Copy the selected files from the right pane into the left "
-                                "pane's folder")
+        self.to_left = QToolButton()
+        self.to_left.setObjectName("copyBtn")
+        self.to_left.setIcon(icons.icon("arrow-left", color="#ffffff"))
+        self.to_left.setIconSize(QSize(20, 20))
+        self.to_left.setToolTip("Copy the selected files from the right side into the folder "
+                                "on the left")
         self.to_left.clicked.connect(lambda: self.copy_selection(self.right, self.left))
+        copy_label = QLabel("Copy")
+        copy_label.setObjectName("dimLabel")
+        copy_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        mid.addWidget(copy_label)
         mid.addWidget(self.to_right)
         mid.addWidget(self.to_left)
         mid.addStretch(1)
         body = QHBoxLayout()
+        body.setContentsMargins(10, 4, 10, 6)
         body.setSpacing(0)
         body.addWidget(self.left, 1)
         body.addLayout(mid)
@@ -507,17 +654,25 @@ class FileManager(QWidget):
         bar.setObjectName("fmStatusbar")
         bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         bh = QHBoxLayout(bar)
-        bh.setContentsMargins(8, 4, 8, 4)
+        bh.setContentsMargins(14, 6, 14, 8)
         self.status = QLabel("Ready")
+        self.status.setObjectName("fmStatus")
         self.progress = QProgressBar()
+        self.progress.setObjectName("fmProgress")
         self.progress.setFixedWidth(260)
+        self.progress.setFixedHeight(6)
+        self.progress.setTextVisible(False)
         self.progress.setRange(0, 1000)
         self.progress.hide()
+        self.percent = QLabel("")
+        self.percent.setObjectName("dimLabel")
+        self.percent.hide()
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.hide()
         self.cancel_btn.clicked.connect(lambda: self._cancel and self._cancel.set())
         bh.addWidget(self.status, 1)
         bh.addWidget(self.progress)
+        bh.addWidget(self.percent)
         bh.addWidget(self.cancel_btn)
 
         v = QVBoxLayout(self)
@@ -550,7 +705,7 @@ class FileManager(QWidget):
         return self.window.config.get(pid) or self._extra_profiles.get(pid)
 
     def sessions_changed(self):
-        sources = [(LOCAL_ID, "Local (this computer)")]
+        sources = [(LOCAL_ID, "This computer", icons.icon("terminal"))]
         seen = {LOCAL_ID}
         for panel in self.window.layout_.panels:
             p = panel.profile
@@ -560,11 +715,13 @@ class FileManager(QWidget):
                 seen.add(p.id)
                 if self.window.config.get(p.id) is None:
                     self._extra_profiles[p.id] = p
-                sources.append((p.id, f"{p.name}  ({p.target})"))
+                sources.append((p.id, f"{p.name}  ·  {p.target}",
+                                icons.dot(theme.accent_for(p.appearance))))
         for p in sorted(self.window.config.profiles, key=lambda x: x.name.lower()):
             if p.id not in seen and not p.is_local:
                 seen.add(p.id)
-                sources.append((p.id, f"{p.name}  ({p.target})"))
+                sources.append((p.id, f"{p.name}  ·  {p.target}",
+                                icons.dot(theme.accent_for(p.appearance))))
         for pane in (self.left, self.right):
             pane.set_sources(sources)
 
@@ -899,9 +1056,12 @@ class FileManager(QWidget):
         if fraction is not None:
             self.progress.setValue(int(max(0.0, min(1.0, fraction)) * 1000))
             self.progress.setFormat(f"{fraction * 100:.0f}%")
+            self.percent.setText(f"{fraction * 100:.0f}%")
 
     def _set_transferring(self, active):
         self.progress.setVisible(active)
+        self.percent.setVisible(active)
+        self.percent.setText("")
         self.cancel_btn.setVisible(active)
         self.to_left.setEnabled(not active)
         self.to_right.setEnabled(not active)

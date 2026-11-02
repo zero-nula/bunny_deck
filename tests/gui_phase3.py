@@ -68,7 +68,7 @@ def test(app):
     pids = (t_u.child_pid, t_r.child_pid)
 
     # --- SCP button on the Ubuntu terminal ------------------------------
-    t_u.scp_btn.click()
+    t_u.scpRequested.emit(t_u)
     fm = win.file_manager
     check(fm is not None and win.current_view() == "files",
           "SCP opens the integrated file manager in the same window")
@@ -79,7 +79,7 @@ def test(app):
     check(set(R.names()) == {"Documents", "notes.md"}, f"real remote contents {R.names()}")
     sources = [L.source.itemText(i) for i in range(L.source.count())]
     check(any("Ubuntu" in s for s in sources) and any("Raspberry" in s for s in sources)
-          and any("Local" in s for s in sources), f"pane sources {sources}")
+          and any("This computer" in s for s in sources), f"pane sources {sources}")
 
     # --- editable path, absolute input never duplicated ------------------
     R.path_entry.setText(os.path.join(ROOTS["ubuntu.invalid"], "Documents"))

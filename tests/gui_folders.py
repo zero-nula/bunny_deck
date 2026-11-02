@@ -75,7 +75,7 @@ def test(app):
     win.resize(1600, 900)
     t = win.open_profile(ubuntu, argv=local_shell_argv())
     yield lambda: t.child_pid
-    t.scp_btn.click()
+    t.scpRequested.emit(t)
     fm = win.file_manager
     L, R = fm.left, fm.right
     yield lambda: R.cwd is not None and L.cwd is not None

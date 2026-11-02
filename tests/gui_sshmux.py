@@ -43,7 +43,7 @@ def test(app):
             break
     check("REMOTE-42" in term_text(panel), "logged in through the terminal")
 
-    panel.scp_btn.click()
+    panel.scpRequested.emit(panel)
     fm = win.file_manager
     R = fm.right
     yield lambda: R.cwd is not None or find_top(CredentialDialog) is not None
