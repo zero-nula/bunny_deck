@@ -37,7 +37,8 @@ def menu_labels(menu):
 
 def test(app):
     win = app.window
-    check(win.ai_button.text() == "AI ▾", "toolbar has an AI menu")
+    check(win.ai_button.accessibleName() == "AI assistants" and win.ai_button.menu(),
+          "toolbar has an AI menu")
     check(menu_labels(win.ai_menu) == ["No AI tools added", "Add…", "Remove"],
           f"installed tools are not listed until added ({menu_labels(win.ai_menu)})")
 

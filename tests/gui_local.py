@@ -27,7 +27,7 @@ def cmdline(pid):
 
 def test(app):
     win = app.window
-    check(win.local_btn.text() == "Local terminal", "toolbar has a Local terminal action")
+    check(win.local_btn.accessibleName() == "Local terminal", "toolbar has a Local terminal action")
 
     win.local_btn.click()
     yield lambda: win.layout_.panels and win.layout_.panels[0].child_pid

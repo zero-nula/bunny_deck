@@ -15,31 +15,279 @@ QToolTip {
     border: 1px solid #1f232a;
 }
 
+/* ----- Shared controls: one design language everywhere -------------------
+ * Radius 6 px, borders #262b33, accent #5b8def (focus, selection), primary
+ * blue #2f5fbf for the main button of a view or dialog (theme.py). */
+
+QPushButton {
+    background-color: #16191e;
+    color: #c9ced6;
+    border: 1px solid #262b33;
+    border-radius: 6px;
+    padding: 5px 14px;
+    min-height: 18px;
+}
+
+QPushButton:hover {
+    background-color: #1d2128;
+    border-color: #323844;
+}
+
+QPushButton:pressed {
+    background-color: #22262e;
+}
+
+QPushButton:checked {
+    background-color: #16233b;
+    border-color: #2c4677;
+    color: #ffffff;
+}
+
+QPushButton:default, QPushButton#primaryBtn {
+    background-color: #2f5fbf;
+    border-color: #3f70d4;
+    color: #ffffff;
+    font-weight: bold;
+}
+
+QPushButton:default:hover, QPushButton#primaryBtn:hover {
+    background-color: #3a6cd0;
+}
+
+QPushButton:disabled, QPushButton#primaryBtn:disabled {
+    background-color: #121418;
+    border-color: #1f232a;
+    color: #4b5260;
+    font-weight: normal;
+}
+
+QLineEdit, QComboBox, QSpinBox {
+    background-color: #0e1013;
+    color: #dfe3ea;
+    border: 1px solid #262b33;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-height: 18px;
+    selection-background-color: #2f5fbf;
+}
+
+QSpinBox {
+    padding: 3px 4px;
+}
+
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
+    border-color: #5b8def;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+
+/* @HERE@ is replaced with this directory when the style sheet is loaded. */
+QComboBox::down-arrow {
+    image: url(@HERE@/chevron-down.svg);
+    width: 10px;
+    height: 10px;
+}
+
+/* Port fields: type the number, or use the wheel or arrow keys. */
+QSpinBox::up-button, QSpinBox::down-button {
+    width: 0px;
+    border: none;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #121418;
+    border: 1px solid #262b33;
+    selection-background-color: #1a2436;
+}
+
+QMenu {
+    border: 1px solid #262b33;
+    padding: 4px;
+}
+
+QMenu::item {
+    padding: 5px 24px 5px 12px;
+    border-radius: 4px;
+}
+
+QMenu::item:selected {
+    background-color: #1a2436;
+    color: #ffffff;
+}
+
+QMenu::item:disabled {
+    color: #4b5260;
+}
+
+QMenu::separator {
+    height: 1px;
+    background-color: #1f232a;
+    margin: 4px 6px;
+}
+
+/* ----- Connections sidebar ------------------------------------------------ */
+
+#sidebar {
+    background-color: #0d0f13;
+}
+
+#sidebarTitle {
+    color: #6b7280;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+#sidebarList {
+    background-color: transparent;
+    outline: 0;
+}
+
+#sidebarAdd {
+    border: none;
+    border-radius: 6px;
+    padding: 3px;
+}
+
+#sidebarAdd:hover {
+    background-color: #1a1d23;
+}
+
+#bodySplit::handle {
+    width: 1px;
+    background-color: #1f232a;
+}
+
+/* ----- Start screen -------------------------------------------------------- */
+
+#welcomeTitle {
+    font-size: 26px;
+    font-weight: bold;
+    color: #e6e9ef;
+}
+
+QPushButton#welcomeCard {
+    background-color: #121418;
+    border: 1px solid #1f232a;
+    border-radius: 8px;
+    padding: 12px 14px;
+    color: #dfe3ea;
+    font-size: 13px;
+    text-align: left;
+    min-height: 40px;
+}
+
+QPushButton#welcomeCard:hover {
+    border-color: #5b8def;
+    background-color: #151a22;
+}
+
+QPushButton#recentRow {
+    background-color: transparent;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 10px;
+    color: #c9ced6;
+    text-align: left;
+}
+
+QPushButton#recentRow:hover {
+    background-color: #15181e;
+    color: #ffffff;
+}
+
 #deckToolbar {
     background-color: #0a0b0d;
     border-bottom: 1px solid #1f232a;
 }
 
-#deckToolbar QPushButton, #deckToolbar QToolButton {
-    min-height: 22px;
-    padding: 2px 10px;
-    border-radius: 4px;
-    border: 1px solid #1f232a;
-    background-color: #121418;
+#deckToolbar QToolButton {
+    min-height: 26px;
+    padding: 2px 6px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background-color: transparent;
     color: #c9ced6;
 }
 
-#deckToolbar QPushButton:hover, #deckToolbar QToolButton:hover {
+#deckToolbar QToolButton[iconOnly="true"] {
+    min-width: 26px;
+    padding: 2px 4px;
+}
+
+#deckToolbar QToolButton:hover {
     background-color: #1a1d23;
 }
 
-#deckToolbar QPushButton:checked {
-    border-color: #5b8def;
+#deckToolbar QToolButton:pressed, #deckToolbar QToolButton:open {
+    background-color: #20242c;
+}
+
+#deckToolbar QToolButton:checked {
+    background-color: #16233b;
+    border-color: #2c4677;
     color: #ffffff;
 }
 
 #deckToolbar QToolButton::menu-indicator {
     image: none;
+}
+
+/* New SSH: the one accented button */
+#deckToolbar QToolButton#primaryBtn {
+    background-color: #2f5fbf;
+    border-color: #3f70d4;
+    color: #ffffff;
+    font-weight: bold;
+    padding: 2px 12px 2px 8px;
+}
+
+#deckToolbar QToolButton#primaryBtn:hover {
+    background-color: #3a6cd0;
+}
+
+#deckToolbar QToolButton#savedBtn {
+    border-color: #1f232a;
+    background-color: #121418;
+    padding: 2px 10px 2px 6px;
+}
+
+#deckToolbar QToolButton#savedBtn:hover {
+    background-color: #1a1d23;
+}
+
+#toolbarSep {
+    background-color: #1f232a;
+}
+
+/* Side by side / stacked: one segmented control */
+#splitSegment {
+    border: 1px solid #1f232a;
+    border-radius: 6px;
+    background-color: #0e1013;
+}
+
+#deckToolbar #splitSegment QToolButton {
+    border: none;
+    border-radius: 0px;
+    min-width: 30px;
+}
+
+#deckToolbar #splitSegment QToolButton#segLeft {
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
+}
+
+#deckToolbar #splitSegment QToolButton#segRight {
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
+}
+
+#deckToolbar #splitSegment QToolButton:checked {
+    background-color: #1d2a44;
 }
 
 #emptyState, #fmRoot, QStackedWidget > QWidget#fmRoot {
@@ -80,9 +328,10 @@ QSplitter::handle:hover {
 
 #termHeader {
     background-color: #121418;
+    border-top: 2px solid transparent;
     border-bottom: 1px solid #1f232a;
-    min-height: 20px;
-    max-height: 20px;
+    min-height: 22px;
+    max-height: 22px;
 }
 
 #termHeader QLabel {
@@ -108,7 +357,8 @@ QSplitter::handle:hover {
     font-size: 11px;
     color: #6b7280;
     border: none;
-    padding: 0 6px;
+    border-radius: 4px;
+    padding: 1px 3px;
     min-height: 16px;
     background: transparent;
 }
@@ -199,10 +449,11 @@ QSplitter::handle:hover {
     background-color: #e8913a;
 }
 
-#deckToolbar QPushButton#broadcastBtn:checked {
+#deckToolbar QToolButton#broadcastBtn:checked {
     border-color: #e8913a;
     background-color: #2a1d10;
-    color: #ffffff;
+    color: #f0a35a;
+    font-weight: bold;
 }
 
 QPushButton#deleteBtn:hover {
@@ -261,24 +512,24 @@ QPushButton#deleteBtn:hover {
     background-color: #3ddc84;
 }
 
-#scanBtn {
-    background-color: #1d3b2a;
-    border: 1px solid #3ddc84;
-    color: #ffffff;
-    padding: 3px 18px;
-    border-radius: 4px;
-}
-
-#scanBtn:hover {
-    background-color: #24503a;
-}
-
-#scanBtn:disabled {
-    background-color: #15181d;
-    border-color: #1f232a;
-    color: #6b7280;
-}
-
 #netScanRoot QPushButton:disabled {
     color: #4b5260;
+}
+
+/* ----- Snap layouts popup ------------------------------------------------ */
+
+#snapPopup {
+    background-color: #121418;
+    border: 1px solid #2c323c;
+    border-radius: 10px;
+}
+
+#snapTitle {
+    color: #e6e9ef;
+    font-weight: bold;
+    font-size: 13px;
+}
+
+QPushButton#snapMore {
+    text-align: left;
 }

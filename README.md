@@ -109,10 +109,16 @@ for your system until `nmap` is installed.
 
 ## Using it
 
-- **+ Add SSH**: enter a name, host (an IP, a hostname or a `~/.ssh/config` alias), an optional username, and a port (default 22).
-  The terminal opens immediately. If you tick *Save*, the profile goes into **Saved Connections**.
-- **Local terminal**: a shell on this computer.
-- **Saved Connections ▾**: opens a new terminal for the chosen profile. The same profile can have any number of sessions.
+When no terminal is open, the **start screen** offers the main actions as big buttons (new SSH connection, local terminal, network scan, import from `~/.ssh/config`) and your most recently opened connections.
+
+The **Connections sidebar** on the left lists the local terminal and every saved connection with its colour (taken from its background). A green number shows how many terminals of a connection are open. Type in **Search…** to filter by name, user or host; Enter opens the first match. Double-click a row (or select it and press Enter) to open a terminal; right-click for key login setup and Remove. The first toolbar button or Ctrl+Shift+S hides and shows the sidebar; Bunny Deck remembers your choice.
+
+- **New SSH** (the blue button): enter a name, host (an IP, a hostname or a `~/.ssh/config` alias), an optional username, and a port (default 22).
+  The terminal opens immediately. If you tick *Save*, the profile goes into **Saved**.
+The other toolbar buttons are icons; hover over one to see its name and shortcut.
+
+- **Terminal icon**: a local shell on this computer.
+- **Saved ▾**: opens a new terminal for the chosen profile. The same profile can have any number of sessions. The menu also has **Import from ~/.ssh/config…**, **Set up key login** and **Remove** (pick a saved profile and confirm; open sessions keep running).
   - **Import from ~/.ssh/config…** lists the hosts defined there (with the user, address and port OpenSSH resolves) and adds the ones you tick. They are saved under their `~/.ssh/config` name, so all settings there keep applying.
   - **Set up key login ▸** (also in a terminal's right-click menu) switches a connection from passwords to an SSH key:
     1. creates `~/.ssh/id_ed25519` if you have no key yet (with an optional passphrase), or uses the existing one;
@@ -121,23 +127,26 @@ for your system until `nmap` is installed.
     4. optionally adds a `Host` entry to `~/.ssh/config` (after a backup copy), so `ssh <name>` works in any terminal.
 
     It never changes the server's SSH settings: password logins stay allowed until you turn them off yourself.
-- **AI ▾**: your own list of AI assistants. **Add…** asks for the command (for example `claude` or `opencode --continue`) and a name; **Remove** takes one off the list.
+- **Sparkles icon (AI)**: your own list of AI assistants. **Add…** asks for the command (for example `claude` or `opencode --continue`) and a name; **Remove** takes one off the list.
   Choosing one runs its command in a new local terminal, in your shell with `~/.bashrc` loaded; when it exits, the shell stays open.
-- **⇉ Broadcast** (or Ctrl+Shift+B): each terminal gets a tick box; tick the ones that should take part. What you type in a ticked terminal — keys, Enter, Ctrl+C, pastes — goes to every ticked terminal.
-  Nothing is ticked when you turn it on. Ticked terminals have an orange frame, and the button shows how many there are.
+- **Broadcast icon** (or Ctrl+Shift+B): each terminal gets a tick box; tick the ones that should take part. What you type in a ticked terminal — keys, Enter, Ctrl+C, pastes — goes to every ticked terminal.
+  Nothing is ticked when you turn it on. Ticked terminals have an orange frame, and the button turns orange and shows how many there are.
   Broadcast is always off when Bunny Deck starts.
-- **Scan Network** (or Ctrl+Shift+M): opens a map of your network. Your network is filled in; press **Scan**.
+- **Radar icon (Scan network)** (or Ctrl+Shift+M): opens a map of your network. Your network is filled in; press **Scan**.
   Devices pop up around the router as `nmap` finds them, then their open ports are checked. The icon and colour show what a device seems to be (SSH server, NAS, printer, router, Windows computer, camera, phone…); a green `>_` badge means you can SSH into it.
   Click a device for its address, manufacturer and open ports; **Connect with SSH…** (or a double-click) opens the Add SSH dialog filled in, **Open in browser** opens its web interface.
   `nmap` runs as your user, never as root, and only on the network you choose. Only scan networks you own or are allowed to scan.
-- **Vertical Split** puts terminals side by side. **Horizontal Split** stacks them top to bottom.
+- **Layout buttons** (middle): the left one puts terminals side by side, the right one stacks them top to bottom.
   You can drag the dividers. Adding or closing a terminal re-balances the layout.
-- **Remove Connection** (top right): pick a saved profile and confirm to remove it. Open sessions keep running.
-- **Terminal header**: shows the name, user@host and status, plus the **Move**, **SCP**, **Background** and **✕** buttons.
-- **Move** places the terminal left of, right of, above or below another terminal, so you can build any mix of rows and columns.
-  Sessions keep running; nothing reconnects. **Vertical Split** / **Horizontal Split** re-arrange all terminals uniformly again.
+- **Keyboard icon** (top right): the list of keyboard shortcuts.
+- **Terminal header**: shows the name and user@host. The dot is green while connected; other states (connecting, disconnected) are also written out. The terminal you are typing in has a thin line over its header in the connection's colour.
+  Move the mouse over a header to show its buttons: **Move** (arrows), **Files** (folder), **Background** (picture). **✕** closes the terminal.
+- **Snap layouts**, as in Windows 11: click **Move** (the arrows in a terminal's header), the layout button in the toolbar (next to the two split buttons) or press Ctrl+Shift+L. A popup shows layouts (two or three columns, one big terminal with two or three beside it, a grid, …); click the part of a layout where the terminal should go, and the other terminals fill the rest.
+- **Drag a terminal by its header** onto another one: a blue preview shows where it will land. Near an edge it goes beside (left, right, above, below); in the middle the two swap places.
+- **Move → Next to a terminal…** places the terminal left of, right of, above or below another terminal, so you can build any mix of rows and columns.
+  Sessions keep running; nothing reconnects. The layout buttons re-arrange all terminals uniformly again.
 - **Copy and paste**: Ctrl+Shift+C / Ctrl+Shift+V, Shift+Insert, middle-click, or the right-click menu.
-- **SCP** opens the file manager inside the main window. The terminals keep running; switch back with **← Terminals** or the **Files** toggle.
+- **Files** (the folder in the header) opens the file manager inside the main window. The terminals keep running; switch back with **← Terminals** or the **Files** toggle.
   - Each pane has its own source selector (Local or any open or saved connection), Up, Home, an editable path, Reload, New Folder and a hidden-files toggle.
   - **Copy →** and **← Copy** copy the selected files into the other pane's current folder. You can also drag files between panes, or from your file manager into a pane.
   - An existing target is never silently replaced: you choose Replace, Skip, Replace All or Cancel.

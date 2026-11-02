@@ -8,15 +8,15 @@ import signal
 import sys
 
 from PyQt6 import sip
-from PyQt6.QtCore import QObject, QPoint, QRect, Qt, QTimer, pyqtClassInfo, pyqtSlot
+from PyQt6.QtCore import QObject, QPoint, QRect, QSize, Qt, QTimer, pyqtClassInfo, pyqtSlot
 from PyQt6.QtDBus import QDBusAbstractAdaptor, QDBusConnection, QDBusInterface
 from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPalette, QShortcut
 from PyQt6.QtWidgets import (
-    QApplication, QButtonGroup, QHBoxLayout, QLabel, QMainWindow, QMenu, QMessageBox,
-    QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QButtonGroup, QFrame, QHBoxLayout, QMainWindow, QMenu, QMessageBox, QSplitter,
+    QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import colorschemes, keysetup, mainthread, session, shortcuts, sshconfig, sshmux
+from . import colorschemes, icons, keysetup, snap, theme, mainthread, session, shortcuts, sshconfig, sshmux
 from .config import (
     KIND_LOCAL, Config, Profile, store_background, validate_host, validate_user,
 )
@@ -24,8 +24,12 @@ from .dialogs import (
     AddAIToolDialog, AddSSHDialog, AppearanceDialog, CredentialDialog, ImportSSHConfigDialog,
     KeySetupDialog, ShortcutsDialog,
 )
-from .layout import ABOVE, BELOW, LEFT, RIGHT, HORIZONTAL_SPLIT, VERTICAL_SPLIT, SplitLayout
+from .layout import (
+    ABOVE, BELOW, HORIZONTAL_SPLIT, LEFT, RIGHT, SWAP, VERTICAL_SPLIT, SplitLayout,
+)
+from .sidebar import LOCAL_ID, ConnectionSidebar
 from .terminal import TerminalPanel, local_shell
+from .welcome import WelcomeScreen
 
 APP_ID = "org.bunnydeck.BunnyDeck"
 APP_NAME = "Bunny Deck"
@@ -42,6 +46,7 @@ class MainWindow(QMainWindow):
         self.active_panel = None
         self.file_manager = None
         self.network_scan = None
+        self.snap_popup = None
         # One unsaved profile shared by all local terminals, so a colour
         # change applies to every open local terminal (like an SSH profile).
         self.local_profile = Profile(name="Local", host="", kind=KIND_LOCAL,
@@ -61,73 +66,157 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(root)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
+        self.sidebar = None
+        self.empty = None
         v.addWidget(self._build_toolbar())
         self.stack = QStackedWidget()
         # (QMainWindow already has a layout() method, hence "layout_".)
         self.layout_ = SplitLayout()
-        self.empty = self._build_empty_state()
+        self.empty = WelcomeScreen(os.path.join(ROOT, "data", "bunny-deck.svg"))
+        self.empty.actionRequested.connect(self.run_shortcut)
+        self.empty.openRequested.connect(self._on_saved_activate)
         self.stack.addWidget(self.empty)
         self.stack.addWidget(self.layout_)
-        v.addWidget(self.stack, 1)
+
+        self.sidebar = ConnectionSidebar()
+        self.sidebar.openRequested.connect(self._on_sidebar_open)
+        self.sidebar.keySetupRequested.connect(self._on_key_setup)
+        self.sidebar.removeRequested.connect(self._on_saved_remove)
+        self.sidebar.addRequested.connect(lambda: self.add_ssh())
+        self.sidebar.importRequested.connect(self.import_ssh_config)
+        self.body = QSplitter(Qt.Orientation.Horizontal)
+        self.body.setObjectName("bodySplit")
+        self.body.setChildrenCollapsible(False)
+        self.body.addWidget(self.sidebar)
+        self.body.addWidget(self.stack)
+        self.body.setStretchFactor(1, 1)
+        self.body.setSizes([230, 970])
+        v.addWidget(self.body, 1)
         self.setCentralWidget(root)
 
+        self.set_sidebar_visible(config.sidebar_visible, save=False)
+        self.refresh_connections()
         self._update_view()
 
+    # ----- sidebar and start screen ---------------------------------------
+
+    def refresh_connections(self):
+        """Updates the sidebar and the start screen (profiles, colours, which
+        connections have terminals open, recent ones)."""
+        if self.sidebar is None or self.empty is None:
+            return
+        counts = {}
+        local_open = 0
+        for p in self.layout_.panels:
+            if p.profile is self.local_profile:
+                local_open += 1
+            counts[p.profile.id] = counts.get(p.profile.id, 0) + 1
+        self.sidebar.set_connections(self.config.profiles, counts,
+                                     theme.accent_for(self.local_profile.appearance), local_open)
+        self.empty.set_recent(self.config.recent_profiles())
+
+    def _on_sidebar_open(self, profile_id):
+        if profile_id == LOCAL_ID:
+            self.open_local()
+        else:
+            self._on_saved_activate(profile_id)
+
+    def set_sidebar_visible(self, visible, save=True):
+        self.sidebar.setVisible(visible)
+        if self.sidebar_btn.isChecked() != visible:
+            self.sidebar_btn.setChecked(visible)
+        if save and visible != self.config.sidebar_visible:
+            self.config.set_sidebar_visible(visible)
+
     # ----- toolbar --------------------------------------------------------
+
+    def _tool_button(self, icon_name, name, tip, slot=None, checkable=False):
+        """An icon-only toolbar button; name is its accessible name, tip the
+        tooltip (with the shortcut)."""
+        b = QToolButton()
+        b.setIcon(icons.icon(icon_name))
+        b.setIconSize(QSize(icons.SIZE, icons.SIZE))
+        b.setAccessibleName(name)
+        b.setToolTip(f"<b>{name}</b><br>{tip}" if tip else name)
+        b.setCheckable(checkable)
+        b.setAutoRaise(True)
+        b.setProperty("iconOnly", True)
+        if slot is not None:
+            (b.toggled if checkable else b.clicked).connect(slot)
+        return b
+
+    @staticmethod
+    def _toolbar_separator():
+        line = QFrame()
+        line.setObjectName("toolbarSep")
+        line.setFixedSize(1, 20)
+        return line
 
     def _build_toolbar(self):
         bar = QWidget()
         bar.setObjectName("deckToolbar")
         bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         h = QHBoxLayout(bar)
-        h.setContentsMargins(6, 3, 6, 3)
-        h.setSpacing(6)
+        h.setContentsMargins(8, 5, 8, 5)
+        h.setSpacing(4)
 
-        add = QPushButton("+ Add SSH")
-        add.setToolTip("Open a new SSH connection")
-        add.clicked.connect(self.add_ssh)
+        self.sidebar_btn = self._tool_button(
+            "sidebar", "Connections sidebar", "Show or hide the saved connections — "
+            "Ctrl+Shift+S", lambda on: self.set_sidebar_visible(on), checkable=True)
+        h.addWidget(self.sidebar_btn)
+        h.addSpacing(2)
+
+        # The two main actions keep their text.
+        add = self.add_btn = QToolButton()
+        add.setObjectName("primaryBtn")
+        add.setText("New SSH")
+        add.setIcon(icons.icon("plus", color="#ffffff"))
+        add.setIconSize(QSize(16, 16))
+        add.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        add.setToolTip("<b>New SSH connection</b><br>Ctrl+Shift+N")
+        add.clicked.connect(lambda: self.add_ssh())
         h.addWidget(add)
 
-        self.local_btn = QPushButton("Local terminal")
-        self.local_btn.setToolTip("Open a shell on this computer")
-        self.local_btn.clicked.connect(self.open_local)
-        # May shrink (clipping its text) so the window stays as narrow as before.
-        self.local_btn.setMinimumWidth(30)
-        h.addWidget(self.local_btn)
-
         self.saved_button = QToolButton()
-        self.saved_button.setText("Saved Connections ▾")
-        self.saved_button.setToolTip("Open a saved connection")
+        self.saved_button.setObjectName("savedBtn")
+        self.saved_button.setText("Saved ▾")
+        self.saved_button.setIcon(icons.icon("saved"))
+        self.saved_button.setIconSize(QSize(icons.SIZE - 2, icons.SIZE - 2))
+        self.saved_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.saved_button.setToolTip("<b>Saved connections</b><br>Open, import, set up key "
+                                     "login or remove — Ctrl+Shift+O")
         self.saved_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.saved_menu = QMenu(self.saved_button)
         self.saved_button.setMenu(self.saved_menu)
-        # Like the Local terminal button, may shrink to keep the window narrow.
-        self.saved_button.setMinimumWidth(30)
         h.addWidget(self.saved_button)
+        h.addSpacing(6)
+        h.addWidget(self._toolbar_separator())
+        h.addSpacing(6)
 
-        self.ai_button = QToolButton()
-        self.ai_button.setText("AI ▾")
-        self.ai_button.setToolTip("Open an AI assistant (e.g. Claude) in a new terminal")
+        self.local_btn = self._tool_button(
+            "terminal", "Local terminal", "A shell on this computer — Ctrl+Shift+T",
+            self.open_local)
+        h.addWidget(self.local_btn)
+
+        self.ai_button = self._tool_button(
+            "ai", "AI assistants", "Open an AI assistant (e.g. Claude) in a new terminal")
         self.ai_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.ai_menu = QMenu(self.ai_button)
         self.ai_button.setMenu(self.ai_menu)
         self.rebuild_ai_menu()
         h.addWidget(self.ai_button)
 
-        self.scan_btn = QPushButton("Scan Network")
-        self.scan_btn.setToolTip("Map the devices on your network with nmap (Ctrl+Shift+M)")
-        # May shrink (clipping its text) so the window stays narrow.
-        self.scan_btn.setMinimumWidth(30)
-        self.scan_btn.clicked.connect(self.open_network_scan)
+        self.scan_btn = self._tool_button(
+            "radar", "Scan network", "A map of the devices on your network (nmap) — "
+            "Ctrl+Shift+M", self.open_network_scan)
         h.addWidget(self.scan_btn)
 
-        self.broadcast_btn = QPushButton("⇉ Broadcast")
+        self.broadcast_btn = self._tool_button(
+            "broadcast", "Broadcast", "Type into several terminals at once — Ctrl+Shift+B",
+            self.set_broadcast_mode, checkable=True)
         self.broadcast_btn.setObjectName("broadcastBtn")
-        self.broadcast_btn.setCheckable(True)
-        self.broadcast_btn.setToolTip("Type into several terminals at once (Ctrl+Shift+B)")
-        # May shrink (clipping its text) so the window stays narrow.
-        self.broadcast_btn.setMinimumWidth(30)
-        self.broadcast_btn.toggled.connect(self.set_broadcast_mode)
+        self.broadcast_btn.setIcon(icons.icon("broadcast", on_color="#f0a35a"))
+        self.broadcast_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         h.addWidget(self.broadcast_btn)
         # Outside a terminal (e.g. in the file manager) these window-wide
         # shortcuts apply; inside one, the terminal's key filter handles them.
@@ -136,48 +225,59 @@ class MainWindow(QMainWindow):
                 QShortcut(seq, self, activated=lambda a=action: self.run_shortcut(a, None))
 
         h.addStretch(1)
-        self.vsplit_btn = QPushButton("Vertical Split")
-        self.vsplit_btn.setToolTip("Arrange terminals side by side")
-        self.hsplit_btn = QPushButton("Horizontal Split")
-        self.hsplit_btn.setToolTip("Stack terminals top to bottom")
+        # Split presets as one segmented control.
+        segment = QFrame()
+        segment.setObjectName("splitSegment")
+        sh = QHBoxLayout(segment)
+        sh.setContentsMargins(0, 0, 0, 0)
+        sh.setSpacing(0)
+        self.vsplit_btn = self._tool_button("split-v", "Side by side",
+                                            "Arrange the terminals in a row")
+        self.hsplit_btn = self._tool_button("split-h", "Stacked",
+                                            "Arrange the terminals top to bottom")
+        self.vsplit_btn.setObjectName("segLeft")
+        self.hsplit_btn.setObjectName("segRight")
         self.split_group = group = QButtonGroup(self)
         for b in (self.vsplit_btn, self.hsplit_btn):
             b.setCheckable(True)
+            b.setAutoRaise(False)
             group.addButton(b)
-            h.addWidget(b)
+            sh.addWidget(b)
+        self.layouts_btn = self._tool_button(
+            "layouts", "Snap layouts", "Arrange the terminals; the current one goes where you "
+            "click — Ctrl+Shift+L", lambda: self.show_snap(self.active_panel, self.layouts_btn))
+        self.layouts_btn.setObjectName("segRight")
+        self.hsplit_btn.setObjectName("segMid")
+        self.layouts_btn.setAutoRaise(False)
+        sh.addWidget(self.layouts_btn)
         self.vsplit_btn.setChecked(True)
         self.vsplit_btn.toggled.connect(lambda on: on and self._set_split(VERTICAL_SPLIT))
         self.hsplit_btn.toggled.connect(lambda on: on and self._set_split(HORIZONTAL_SPLIT))
+        h.addWidget(segment)
         h.addStretch(1)
 
-        self.files_btn = QPushButton("Files")
-        self.files_btn.setCheckable(True)
-        self.files_btn.setToolTip("Show the file manager (terminals keep running)")
-        self.files_btn.toggled.connect(self._on_files_toggled)
+        self.files_btn = self._tool_button(
+            "folder", "Files", "Show the file manager (terminals keep running) — Ctrl+Shift+F",
+            self._on_files_toggled, checkable=True)
+        self.files_btn.setText("Files")
+        self.files_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self.files_btn.hide()
         h.addWidget(self.files_btn)
-        self.remove_button = QToolButton()
-        self.remove_button.setText("Remove Connection")
-        self.remove_button.setToolTip("Remove a saved connection")
-        self.remove_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.remove_menu = QMenu(self.remove_button)
-        self.remove_button.setMenu(self.remove_menu)
-        h.addWidget(self.remove_button)
+        self.help_btn = self._tool_button("keyboard", "Keyboard shortcuts", "Ctrl+Shift+?",
+                                          lambda: self.run_shortcut("help"))
+        h.addWidget(self.help_btn)
         self.rebuild_saved_menu()
         return bar
 
     def rebuild_saved_menu(self):
+        self.refresh_connections()
         self.saved_menu.clear()
-        self.remove_menu.clear()
-        if not self.config.profiles:
-            for menu in (self.saved_menu, self.remove_menu):
-                menu.addAction("No saved connections").setEnabled(False)
-        for profile in sorted(self.config.profiles, key=lambda p: p.name.lower()):
-            label = f"{profile.name}    {profile.target}"
-            a = self.saved_menu.addAction(label)
+        profiles = sorted(self.config.profiles, key=lambda p: p.name.lower())
+        if not profiles:
+            self.saved_menu.addAction("No saved connections").setEnabled(False)
+        for profile in profiles:
+            a = self.saved_menu.addAction(f"{profile.name}    {profile.target}")
             a.triggered.connect(lambda _=False, pid=profile.id: self._on_saved_activate(pid))
-            a = self.remove_menu.addAction(label)
-            a.triggered.connect(lambda _=False, pid=profile.id: self._on_saved_remove(pid))
         self.saved_menu.addSeparator()
         self.saved_menu.addAction("Import from ~/.ssh/config…").triggered.connect(
             self.import_ssh_config)
@@ -187,6 +287,12 @@ class MainWindow(QMainWindow):
         for profile in sorted(ssh_profiles, key=lambda p: p.name.lower()):
             a = keys.addAction(f"{profile.name}    {profile.target}")
             a.triggered.connect(lambda _=False, pid=profile.id: self._on_key_setup(pid))
+        # Removing is rare, so it lives at the end of this menu.
+        self.remove_menu = self.saved_menu.addMenu("Remove")
+        self.remove_menu.setEnabled(bool(profiles))
+        for profile in profiles:
+            a = self.remove_menu.addAction(f"{profile.name}    {profile.target}")
+            a.triggered.connect(lambda _=False, pid=profile.id: self._on_saved_remove(pid))
 
     def _on_key_setup(self, profile_id):
         profile = self.config.get(profile_id)
@@ -269,23 +375,6 @@ class MainWindow(QMainWindow):
             self.file_manager._extra_profiles[profile.id] = profile
         self.config.remove(profile_id)
         self.rebuild_saved_menu()
-
-    def _build_empty_state(self):
-        w = QWidget()
-        w.setObjectName("emptyState")
-        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        v = QVBoxLayout(w)
-        v.addStretch(1)
-        title = QLabel("No open sessions")
-        title.setObjectName("emptyTitle")
-        hint = QLabel("Use “+ Add SSH”, “Local terminal” or “Saved Connections” to open "
-                      "a terminal.")
-        hint.setObjectName("dimLabel")
-        for lbl in (title, hint):
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            v.addWidget(lbl)
-        v.addStretch(1)
-        return w
 
     # ----- sessions -------------------------------------------------------
 
@@ -390,10 +479,15 @@ class MainWindow(QMainWindow):
         panel.scpRequested.connect(self.open_file_manager)
         panel.focused.connect(self._on_panel_focused)
         panel.moveMenuRequested.connect(self._fill_move_menu)
+        panel.snapRequested.connect(lambda p: self.show_snap(p, p.move_btn))
+        panel.headerDragged.connect(self._on_header_drag)
         # In a custom arrangement, open next to the active terminal instead of
         # flattening the layout; with a preset, keep the uniform row/column.
         near = self.active_panel if self.layout_.custom else None
         self.layout_.add_panel(panel, near=near)
+        if self.config.get(profile.id) is not None:
+            self.config.mark_used(profile.id)
+        self.refresh_connections()
         if self.file_manager is not None:
             self.file_manager.sessions_changed()
         self.show_terminals()
@@ -418,6 +512,12 @@ class MainWindow(QMainWindow):
             self.broadcast_btn.toggle()
         elif action == "network-scan":
             self.open_network_scan()
+        elif action == "import":
+            self.import_ssh_config()
+        elif action == "layouts":
+            self.show_snap(panel, self.layouts_btn)
+        elif action == "sidebar":
+            self.set_sidebar_visible(not self.sidebar.isVisible())
         elif action == "help":
             dlg = ShortcutsDialog(self, shortcuts.OVERVIEW)
             dlg.exec()
@@ -505,13 +605,15 @@ class MainWindow(QMainWindow):
 
     def _update_broadcast_button(self, *_):
         n = sum(1 for p in self.layout_.panels if p.broadcast) if self.broadcasting else 0
-        self.broadcast_btn.setText(f"⇉ Broadcast: {n}" if self.broadcasting else "⇉ Broadcast")
+        # The count of ticked terminals sits next to the icon while it is on.
+        self.broadcast_btn.setText(str(n) if self.broadcasting else "")
 
     def close_panel(self, panel):
         panel.set_broadcast(False)
         panel.terminate()
         self.layout_.remove_panel(panel)
         panel.deleteLater()
+        self.refresh_connections()
         if self.active_panel is panel:
             self.active_panel = None
             if self.layout_.panels:
@@ -576,6 +678,7 @@ class MainWindow(QMainWindow):
             saver(result)
         profile.appearance = result
         preview(result)
+        self.refresh_connections()
 
     def supports_alpha(self):
         app = QApplication.instance()
@@ -643,15 +746,70 @@ class MainWindow(QMainWindow):
                 a = sub.addAction(f"{i}. {ref.profile.name}    {ref.profile.target}")
                 a.triggered.connect(lambda _=False, r=ref, s=side: self.move_panel(panel, r, s))
 
-    def move_panel(self, panel, ref, side):
-        """Moves a running terminal next to another; switches to Custom Layout."""
-        if not self.layout_.move_panel(panel, ref, side):
+    # ----- snap layouts and dragging --------------------------------------
+
+    def show_snap(self, panel, anchor):
+        """The snap layouts popup for panel (the active terminal if None)."""
+        panel = panel if panel in self.layout_.panels else self.active_panel
+        if panel is None and self.layout_.panels:
+            panel = self.layout_.panels[0]
+        if panel is None:
+            return None
+        n = len(self.layout_.panels)
+        extra = None
+        if n > 1:
+            extra = snap.next_to_button("Next to a terminal…", panel.move_menu)
+        popup = snap.SnapPopup(n, f"Click where “{panel.profile.name}” should go", extra, self)
+        popup.picked.connect(lambda template, zone: self.apply_snap(template, zone, panel))
+        popup.show_below(anchor)
+        self.snap_popup = popup
+        return popup
+
+    def apply_snap(self, template, zone, panel):
+        if panel not in self.layout_.panels:
             return
+        tree = snap.resolve(template, len(self.layout_.panels))
+        by_zone = snap.assign(tree, self.layout_.ordered_panels(), panel, zone)
+        self.layout_.arrange(snap.build(tree, by_zone))
+        if template == snap.ALL_SIDE_BY_SIDE:
+            self.set_split(VERTICAL_SPLIT)
+        elif template == snap.ALL_STACKED:
+            self.set_split(HORIZONTAL_SPLIT)
+        else:
+            self.layout_.custom = True
+            self._clear_presets()
+        self.show_terminals()
+        self._focus_panel(panel)
+
+    def _clear_presets(self):
         # Neither preset applies any more; clicking one re-applies it.
         self.split_group.setExclusive(False)
         for b in (self.vsplit_btn, self.hsplit_btn):
             b.setChecked(False)
         self.split_group.setExclusive(True)
+
+    def _on_header_drag(self, panel, global_pos, phase):
+        """A terminal dragged by its header: preview while moving, place it
+        on drop (on a side of another terminal, or swap in the middle)."""
+        target = self.layout_.drop_target(global_pos, panel)
+        if phase in ("start", "move"):
+            self.layout_.show_drop_preview(target, panel)
+            return
+        self.layout_.hide_drop_preview()
+        if target is None:
+            return
+        ref, side, _ = target
+        if side == SWAP:
+            self.layout_.swap_panels(panel, ref)
+            self._focus_panel(panel)
+        else:
+            self.move_panel(panel, ref, side)
+
+    def move_panel(self, panel, ref, side):
+        """Moves a running terminal next to another; switches to Custom Layout."""
+        if not self.layout_.move_panel(panel, ref, side):
+            return
+        self._clear_presets()
         self.show_terminals()
         panel.focus_terminal()
 
@@ -844,7 +1002,7 @@ def create_application(argv):
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
     with open(os.path.join(HERE, "style.qss"), encoding="utf-8") as f:
-        app.setStyleSheet(f.read())
+        app.setStyleSheet(f.read().replace("@HERE@", HERE))
     mainthread.init()
     app.aboutToQuit.connect(lambda: shutil.rmtree(colorschemes.scheme_dir(), True))
     app.aboutToQuit.connect(sshmux.shutdown)

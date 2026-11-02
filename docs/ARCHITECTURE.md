@@ -26,6 +26,11 @@ native/                   pyproject.toml.in + SIP declaration of the QTermWidget
 data/                     icon, .desktop template, default background (and its generator)
 bunnydeck/app.py           QApplication setup, main window, toolbar, AI menu, single instance (D-Bus)
 bunnydeck/layout.py        nested QSplitters, Move and split presets
+bunnydeck/snap.py          snap layout templates, zone assignment and the popup
+bunnydeck/sidebar.py       connections sidebar (search, colour dots, open terminal counts)
+bunnydeck/welcome.py       start screen: main actions and recent connections
+bunnydeck/theme.py         shared colours; a connection's accent colour from its background
+bunnydeck/icons.py         toolbar and header icons drawn with QPainter
 bunnydeck/terminal.py      terminal panel: header + QTermWidget, starts ssh or a shell
 bunnydeck/colorschemes.py  per-profile colours as generated QTermWidget colour schemes
 bunnydeck/background.py    background images composed to the terminal's size
@@ -136,12 +141,44 @@ and Ctrl+Shift+B are never broadcast. The state is never saved.
 
 ### Layout and resizing
 
+Snap layouts (`snap.py`) are templates in the same form as `describe()`
+(orientation, weights, children) with zone numbers as leaves. Choosing a
+zone puts that terminal there and the others in the remaining zones in
+reading order (more terminals than zones share the last free zone; unused
+zones are dropped); the result goes through `arrange()`, so terminals are
+only moved, never restarted. Dragging a header emits `headerDragged`; the
+layout finds the terminal under the cursor (`drop_target`: the middle third
+swaps, otherwise the nearest edge picks the side) and paints the preview in
+a mouse-transparent overlay above the splitters.
+
 The layout (`layout.py`) is a tree of nested `QSplitter`s. Moving a terminal
 or switching between vertical and horizontal split only re-arranges the
 panels; they are never recreated, and no session reconnects. On window
 resize the splitters keep their proportions and QTermWidget rewraps its
 content itself. There are no resize overrides, forced scrolling, terminal
 clearing or padding tricks.
+
+## Look and feel
+
+One design language across the main window, the file manager, the network
+scan and the dialogs: `style.qss` styles every button, field and menu the
+same way (6 px radius, one border colour, the accent `#5b8def` for focus and
+selection, a primary blue for the main button of a view or dialog), and
+`theme.py` holds the colours for code that paints itself. Icons are drawn by
+`icons.py` with QPainter rather than taken from the icon theme, so they look
+the same on every desktop.
+
+Each connection has an accent colour derived from its background
+(`theme.accent_for`: same hue, bright; grey backgrounds get the app accent).
+It is the dot in the sidebar and on the start screen, and the line over the
+active terminal's header. The header's Move, Files and Background buttons
+sit behind a `QGraphicsOpacityEffect` that fades them in while the mouse is
+over the header, so the header never changes size.
+
+The sidebar and the recent list are refreshed from the open panels and the
+config whenever a terminal opens or closes or a profile changes
+(`MainWindow.refresh_connections`). `config.json` keeps `recent` (the last
+six saved connections opened) and `sidebar_visible`.
 
 ## Colours, transparency and background images
 

@@ -654,7 +654,7 @@ class NetworkScanWindow(QWidget):
         self.fit_btn.setToolTip("Show the whole map (wheel zooms, drag moves)")
         top.addWidget(self.fit_btn)
         self.scan_btn = QPushButton("Scan")
-        self.scan_btn.setObjectName("scanBtn")
+        self.scan_btn.setObjectName("primaryBtn")
         self.scan_btn.setDefault(True)
         top.addWidget(self.scan_btn)
 

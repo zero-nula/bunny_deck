@@ -23,7 +23,7 @@ SHOT = os.environ.get("NETSCAN_SCREENSHOT")
 
 def test(app):
     win = app.window
-    check(win.scan_btn.text() == "Scan Network", "toolbar has a Scan Network button")
+    check(win.scan_btn.accessibleName() == "Scan network", "toolbar has a Scan Network button")
     win.run_shortcut("network-scan")
     w = win.network_scan
     yield lambda: w is not None and w.isVisible()

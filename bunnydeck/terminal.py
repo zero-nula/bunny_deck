@@ -9,14 +9,14 @@ QTermWidget handles resizing itself.
 import os
 import signal
 
-from PyQt6.QtCore import QEvent, QObject, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QPropertyAnimation, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QKeyEvent, QKeySequence
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QHBoxLayout, QLabel, QMenu, QSizePolicy, QToolButton, QVBoxLayout,
-    QWidget,
+    QApplication, QCheckBox, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QSizePolicy,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import background, colorschemes, shortcuts, sshmux
+from . import background, colorschemes, icons, shortcuts, sshmux, theme
 from .config import Appearance
 from .native import QTermWidget
 
@@ -117,6 +117,10 @@ class TerminalPanel(QWidget):
     focused = pyqtSignal(object)
     # (panel, QMenu): the window fills the Move menu just before it opens.
     moveMenuRequested = pyqtSignal(object, object)
+    # The Move button: the window shows the snap layouts for this panel.
+    snapRequested = pyqtSignal(object)
+    # Dragging by the header: (panel, global QPoint, "start" | "move" | "drop").
+    headerDragged = pyqtSignal(object, object, str)
 
     _counter = 0
 
@@ -181,34 +185,47 @@ class TerminalPanel(QWidget):
         h.addWidget(self.target_label, 1)
         h.addWidget(self.status_label)
 
-        def button(text, tip, sig, name="hdrBtn"):
+        def button(icon_name, text, tip, sig=None, name="hdrBtn"):
             b = QToolButton(header)
-            b.setText(text)
+            b.setText(text)  # (the accessible name; only the icon shows)
+            b.setIcon(icons.icon(icon_name))
+            b.setIconSize(QSize(14, 14))
+            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
             b.setToolTip(tip)
             b.setObjectName(name)
             b.setAutoRaise(True)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            b.clicked.connect(lambda: sig.emit(self))
+            if sig is not None:
+                b.clicked.connect(lambda: sig.emit(self))
             h.addWidget(b)
             return b
 
-        self.move_btn = QToolButton(header)
-        self.move_btn.setText("Move")
-        self.move_btn.setToolTip("Place this terminal next to another one")
-        self.move_btn.setObjectName("hdrBtn")
-        self.move_btn.setAutoRaise(True)
-        self.move_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.move_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.move_btn = button("move", "Move", "Snap layouts: choose where this terminal goes. "
+                               "You can also drag the terminal by its header.", self.snapRequested)
+        # The exact "left of / right of … another terminal" menu, offered in
+        # the snap popup.
         self.move_menu = QMenu(self.move_btn)
         self.move_menu.aboutToShow.connect(lambda: self.moveMenuRequested.emit(self, self.move_menu))
-        self.move_btn.setMenu(self.move_menu)
-        h.addWidget(self.move_btn)
-        self.scp_btn = button("SCP", "Open file manager for this connection", self.scpRequested)
-        self.appearance_btn = button("Background", "Terminal background (colour, opacity "
-                                     "and image)", self.appearanceRequested)
-        # May shrink (clipping its text) so two panels still fit a narrow window.
-        self.appearance_btn.setMinimumWidth(40)
-        self.close_btn = button("✕", "Close this session", self.closeRequested, "hdrClose")
+        self._drag_start = None
+        self._dragging = False
+        self.scp_btn = button("folder", "SCP", "Files: open the file manager for this "
+                              "connection (Ctrl+Shift+F)", self.scpRequested)
+        self.appearance_btn = button("image", "Background", "Background: colour, opacity and "
+                                     "image of this terminal", self.appearanceRequested)
+        # Move, files and background show while the mouse is over the header
+        # (faded in, so the header never shifts); close is always there.
+        self.tools = (self.move_btn, self.scp_btn, self.appearance_btn)
+        self._hovered = False
+        self._tool_effects = []
+        for b in self.tools:
+            effect = QGraphicsOpacityEffect(b)
+            effect.setOpacity(0.0)
+            b.setGraphicsEffect(effect)
+            self._tool_effects.append(effect)
+        self.close_btn = button("close", "✕", "Close this session (Ctrl+Shift+W)",
+                                self.closeRequested, "hdrClose")
+        header.installEventFilter(self)
+        header.setCursor(Qt.CursorShape.OpenHandCursor)
         return header
 
     def _build_terminal(self):
@@ -260,9 +277,52 @@ class TerminalPanel(QWidget):
         return term
 
     def eventFilter(self, obj, event):
-        if obj is self.display and event.type() == QEvent.Type.Resize and self.appearance.image:
+        if obj is self.header and event.type() in (QEvent.Type.Enter, QEvent.Type.Leave):
+            self._hovered = event.type() == QEvent.Type.Enter
+            self._show_tools(self._hovered)
+        elif obj is self.header and event.type() in (
+                QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove,
+                QEvent.Type.MouseButtonRelease):
+            return self._header_drag(event)
+        elif (obj is getattr(self, "display", None) and event.type() == QEvent.Type.Resize
+                and self.appearance.image):
             self._bg_timer.start()
         return False
+
+    def _header_drag(self, event):
+        """Press and drag the header to move the terminal (see headerDragged)."""
+        t = event.type()
+        gpos = event.globalPosition().toPoint()
+        if t == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = gpos
+            return False
+        if t == QEvent.Type.MouseMove and self._drag_start is not None:
+            if not self._dragging:
+                if (gpos - self._drag_start).manhattanLength() < \
+                        QApplication.startDragDistance():
+                    return False
+                self._dragging = True
+                self.header.setCursor(Qt.CursorShape.ClosedHandCursor)
+                self.headerDragged.emit(self, gpos, "start")
+            self.headerDragged.emit(self, gpos, "move")
+            return True
+        if t == QEvent.Type.MouseButtonRelease:
+            was = self._dragging
+            self._drag_start = None
+            self._dragging = False
+            if was:
+                self.header.setCursor(Qt.CursorShape.OpenHandCursor)
+                self.headerDragged.emit(self, gpos, "drop")
+                return True
+        return False
+
+    def _show_tools(self, on):
+        """Fades the header's Move / Files / Background buttons in or out."""
+        for effect in self._tool_effects:
+            anim = QPropertyAnimation(effect, b"opacity", effect)
+            anim.setDuration(120)
+            anim.setEndValue(1.0 if on else 0.0)
+            anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
     # ----- appearance -----------------------------------------------------
 
@@ -272,6 +332,7 @@ class TerminalPanel(QWidget):
         self.terminal.setColorScheme(colorschemes.scheme_path(appearance.background))
         self.terminal.setTerminalOpacity(appearance.opacity)
         self._update_background_image()
+        self._update_active_line()
 
     def _update_background_image(self):
         """(Re)composes the background image at the display's current size.
@@ -337,6 +398,8 @@ class TerminalPanel(QWidget):
 
     def _set_status(self, text, state):
         self.status_label.setText(text)
+        # "connected" is the green dot; other states are spelled out.
+        self.status_label.setVisible(state != "ok")
         self.status_dot.setToolTip(text)
         self.status_dot.setProperty("state", state)
         self.status_dot.style().unpolish(self.status_dot)
@@ -421,6 +484,12 @@ class TerminalPanel(QWidget):
         self.setProperty("active", bool(active))
         self.style().unpolish(self)
         self.style().polish(self)
+        self._update_active_line()
+
+    def _update_active_line(self):
+        """A thin line over the active terminal's header, in its colour."""
+        color = theme.accent_for(self.appearance) if self.property("active") else "transparent"
+        self.header.setStyleSheet(f"#termHeader {{ border-top: 2px solid {color}; }}")
 
     def focus_terminal(self):
         getattr(self, "display", self.terminal).setFocus()

@@ -35,7 +35,7 @@ def test(app):
     check(win.broadcasting and all(p.broadcast_box.isVisible() for p in (a, b, c, local)),
           "Broadcast shows a tick box on every terminal")
     check(not any(p.broadcast for p in (a, b, c, local))
-          and win.broadcast_btn.text() == "⇉ Broadcast: 0",
+          and win.broadcast_btn.text() == "0",
           "nothing is ticked: the user picks the terminals")
     type_line(a, "echo NONE-$((5*5))")
     yield lambda: "NONE-25" in term_text(a)
@@ -44,10 +44,10 @@ def test(app):
 
     for p in (a, b, c):
         p.broadcast_box.click()
-    check(win.broadcast_btn.text() == "⇉ Broadcast: 3", f"button counts ({win.broadcast_btn.text()})")
+    check(win.broadcast_btn.text() == "3", f"button counts ({win.broadcast_btn.text()})")
     check(a.property("broadcast") is True, "ticked terminals are highlighted")
     c.broadcast_box.click()
-    check(not c.broadcast and win.broadcast_btn.text() == "⇉ Broadcast: 2",
+    check(not c.broadcast and win.broadcast_btn.text() == "2",
           "unticking a terminal takes it out")
 
     type_line(a, "echo BC-$((6*7))")
@@ -78,7 +78,7 @@ def test(app):
           "a terminal opened during broadcast joins only when ticked")
 
     win.close_panel(b)
-    check(win.broadcast_btn.text() == "⇉ Broadcast: 1", "closing a terminal updates the count")
+    check(win.broadcast_btn.text() == "1", "closing a terminal updates the count")
 
     QTest.keyClick(a.display, Qt.Key.Key_B,
                    Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
@@ -86,7 +86,7 @@ def test(app):
           "Ctrl+Shift+B in a terminal turns broadcast off")
     check(not a.broadcast_box.isVisible() and not a.broadcast and a.property("broadcast") is False,
           "tick boxes and highlight gone")
-    check(win.broadcast_btn.text() == "⇉ Broadcast", "button back to normal")
+    check(win.broadcast_btn.text() == "", "button back to normal")
     type_line(a, "echo SOLO-$((3+4))")
     yield lambda: "SOLO-7" in term_text(a)
     yield 0.3

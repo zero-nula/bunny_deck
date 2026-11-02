@@ -9,7 +9,8 @@ the existing size proportions.
 """
 
 from PyQt6 import sip
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import QPoint, QRect, QRectF, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import QSplitter, QVBoxLayout, QWidget
 
 # "Vertical split": panels side by side, separated by vertical dividers.
@@ -18,6 +19,7 @@ VERTICAL_SPLIT = Qt.Orientation.Horizontal
 HORIZONTAL_SPLIT = Qt.Orientation.Vertical
 
 LEFT, RIGHT, ABOVE, BELOW = "left", "right", "above", "below"
+SWAP = "swap"
 _SIDE_ORIENTATION = {LEFT: VERTICAL_SPLIT, RIGHT: VERTICAL_SPLIT,
                      ABOVE: HORIZONTAL_SPLIT, BELOW: HORIZONTAL_SPLIT}
 
@@ -39,6 +41,8 @@ class SplitLayout(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.addWidget(self.splitter)
+        self.overlay = _DropOverlay(self)
+        self.overlay.hide()
 
     @property
     def orientation(self):
@@ -101,6 +105,81 @@ class SplitLayout(QWidget):
         self.custom = True
         self._equalize_later(panel.parentWidget())
         return True
+
+    def swap_panels(self, a, b):
+        """Exchanges the places of two terminals."""
+        if a is b or a not in self.panels or b not in self.panels:
+            return False
+
+        def walk(node):
+            orientation, sizes, children = node
+            out = []
+            for c in children:
+                if isinstance(c, tuple):
+                    out.append(walk(c))
+                else:
+                    out.append(b if c is a else a if c is b else c)
+            return (orientation, sizes, out)
+
+        custom = self.custom
+        self.arrange(walk(self.describe()))
+        self.custom = custom or self.custom
+        return True
+
+    # ----- dragging a terminal by its header ------------------------------
+
+    def drop_target(self, global_pos, dragged):
+        """Where dragged would go if dropped at global_pos: (ref panel, side,
+        QRect in this widget's coordinates to preview), or None. The middle of
+        a terminal swaps the two; near an edge places dragged on that side."""
+        pos = self.mapFromGlobal(global_pos)
+        for p in self.panels:
+            if p is dragged or not p.isVisible():
+                continue
+            r = QRect(p.mapTo(self, QPoint(0, 0)), p.size())
+            if not r.contains(pos):
+                continue
+            rx = (pos.x() - r.x()) / max(1, r.width())
+            ry = (pos.y() - r.y()) / max(1, r.height())
+            if 0.3 < rx < 0.7 and 0.3 < ry < 0.7:
+                return p, SWAP, r
+            side = min(((rx, LEFT), (1 - rx, RIGHT), (ry, ABOVE), (1 - ry, BELOW)))[1]
+            half = QRect(r)
+            if side == LEFT:
+                half.setWidth(r.width() // 2)
+            elif side == RIGHT:
+                half.setLeft(r.x() + r.width() // 2)
+            elif side == ABOVE:
+                half.setHeight(r.height() // 2)
+            else:
+                half.setTop(r.y() + r.height() // 2)
+            return p, side, half
+        return None
+
+    def show_drop_preview(self, target, dragged):
+        if target is None:
+            self.overlay.set_target(None, "", None)
+            return
+        ref, side, rect = target
+        words = {SWAP: "Swap with", LEFT: "Left of", RIGHT: "Right of", ABOVE: "Above",
+                 BELOW: "Below"}
+        src = QRect(dragged.mapTo(self, QPoint(0, 0)), dragged.size())
+        self.overlay.set_target(rect, f"{words[side]} {ref.profile.name}", src)
+
+    def hide_drop_preview(self):
+        self.overlay.hide()
+
+    def drop(self, dragged, target):
+        if target is None:
+            return False
+        ref, side, _ = target
+        if side == SWAP:
+            return self.swap_panels(dragged, ref)
+        return self.move_panel(dragged, ref, side)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.overlay.setGeometry(self.rect())
 
     def ordered_panels(self):
         """Panels in visual order (depth first, left to right / top to bottom)."""
@@ -235,3 +314,45 @@ class SplitLayout(QWidget):
         if n:
             total = s.width() if s.orientation() == Qt.Orientation.Horizontal else s.height()
             s.setSizes([max(1, total // n)] * n)
+
+
+class _DropOverlay(QWidget):
+    """The preview while a terminal is dragged: where it will land (accent
+    colour) and where it comes from (dimmed)."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.target = None
+        self.source = None
+        self.label = ""
+
+    def set_target(self, rect, label, source):
+        self.target, self.label, self.source = rect, label, source
+        self.setGeometry(self.parentWidget().rect())
+        self.raise_()
+        self.show()
+        self.update()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.source is not None:
+            p.fillRect(self.source, QColor(10, 11, 13, 150))
+        if self.target is not None:
+            r = QRectF(self.target).adjusted(6, 6, -6, -6)
+            p.setPen(QPen(QColor(91, 141, 239), 2))
+            p.setBrush(QColor(91, 141, 239, 60))
+            p.drawRoundedRect(r, 10, 10)
+            f = QFont()
+            f.setPixelSize(15)
+            f.setBold(True)
+            p.setFont(f)
+            text_w = p.fontMetrics().horizontalAdvance(self.label) + 28
+            pill = QRectF(r.center().x() - text_w / 2, r.center().y() - 16, text_w, 32)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(47, 95, 191, 230))
+            p.drawRoundedRect(pill, 16, 16)
+            p.setPen(QColor("#ffffff"))
+            p.drawText(pill, Qt.AlignmentFlag.AlignCenter, self.label)
+        p.end()

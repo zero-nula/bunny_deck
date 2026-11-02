@@ -22,6 +22,7 @@ _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # How a background image is placed in the terminal (QTermWidget modes).
 IMAGE_MODES = ("fill", "fit", "stretch", "center")
 DEFAULT_IMAGE_MODE = "fill"
+RECENT_MAX = 6
 
 # Profile kinds. Profiles written before "kind" existed have none: they are SSH.
 KIND_SSH = "ssh"
@@ -207,6 +208,8 @@ class Config:
         self.profiles = []
         self.ai_tools = []
         self.local_appearance = Appearance()
+        self.recent = []  # profile ids, most recently opened first
+        self.sidebar_visible = True
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -229,6 +232,11 @@ class Config:
                 self.ai_tools.append(AITool.from_dict(t))
             except (KeyError, TypeError, ValueError):
                 continue
+        ids = {p.id for p in self.profiles}
+        recent = data.get("recent", [])
+        if isinstance(recent, list):
+            self.recent = [r for r in recent if isinstance(r, str) and r in ids][:RECENT_MAX]
+        self.sidebar_visible = data.get("sidebar_visible", True) is not False
 
     def save(self):
         if getattr(self, "_broken", False):
@@ -240,7 +248,8 @@ class Config:
         os.makedirs(os.path.dirname(self.path), mode=0o700, exist_ok=True)
         data = {"version": 1, "profiles": [p.to_dict() for p in self.profiles],
                 "ai_tools": [t.to_dict() for t in self.ai_tools],
-                "local_appearance": asdict(self.local_appearance)}
+                "local_appearance": asdict(self.local_appearance),
+                "recent": self.recent, "sidebar_visible": self.sidebar_visible}
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path), prefix=".config-")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -271,8 +280,23 @@ class Config:
         if p is None:
             return None
         self.profiles = [q for q in self.profiles if q.id != profile_id]
+        self.recent = [r for r in self.recent if r != profile_id]
         self.save()
         return p
+
+    def mark_used(self, profile_id):
+        """Puts a saved profile first in the recent list (the start screen)."""
+        if self.get(profile_id) is None:
+            return
+        self.recent = ([profile_id] + [r for r in self.recent if r != profile_id])[:RECENT_MAX]
+        self.save()
+
+    def recent_profiles(self):
+        return [p for p in (self.get(r) for r in self.recent) if p is not None]
+
+    def set_sidebar_visible(self, visible):
+        self.sidebar_visible = bool(visible)
+        self.save()
 
     def update_appearance(self, profile_id, appearance):
         p = self.get(profile_id)
