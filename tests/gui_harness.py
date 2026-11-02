@@ -21,7 +21,7 @@ if not os.environ.get("XDG_CONFIG_HOME", "").startswith(tempfile.gettempdir()):
 from PyQt6.QtCore import QTimer  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
 
-from bunnydeck.app import MainWindow, create_application  # noqa: E402
+from bunnydeck.app import MainWindow, create_application, dispose_windows  # noqa: E402
 from bunnydeck.config import Config, Profile  # noqa: E402
 
 RESULTS = []
@@ -121,6 +121,7 @@ def run(test_gen_factory, timeout=60):
 
     QTimer.singleShot(400, step)
     app.exec()
+    dispose_windows()
     failed = [m for ok, m in RESULTS if not ok]
     print(f"\n{len(RESULTS) - len(failed)}/{len(RESULTS)} checks passed")
     return 1 if failed or not RESULTS else 0

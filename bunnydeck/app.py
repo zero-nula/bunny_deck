@@ -7,6 +7,7 @@ import shutil
 import signal
 import sys
 
+from PyQt6 import sip
 from PyQt6.QtCore import QObject, QPoint, QRect, Qt, QTimer, pyqtClassInfo, pyqtSlot
 from PyQt6.QtDBus import QDBusAbstractAdaptor, QDBusConnection, QDBusInterface
 from PyQt6.QtGui import QColor, QIcon, QKeySequence, QPalette, QShortcut
@@ -845,4 +846,15 @@ def main(argv=None):
     # instance; a second launch just raises this window above).
     if not window.restore_session():
         window.open_local()
-    return app.exec()
+    code = app.exec()
+    dispose_windows()
+    return code
+
+
+def dispose_windows():
+    """Deletes the main windows while QApplication still exists. Otherwise
+    Python may destroy them during interpreter shutdown, after QApplication,
+    which can crash (seen as a segfault on exit)."""
+    for w in QApplication.topLevelWidgets():
+        if isinstance(w, MainWindow) and not sip.isdeleted(w):
+            sip.delete(w)
