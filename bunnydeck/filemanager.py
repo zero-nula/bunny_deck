@@ -478,7 +478,7 @@ class FileManager(QWidget):
         back.clicked.connect(self.window.show_terminals)
         th.addWidget(back)
         title = QLabel("<b>File Transfer</b>&nbsp;&nbsp;<small>Select a source and a target "
-                       "for each side. Files are copied, never moved or deleted.</small>")
+                       "for each side. Files are copied, never moved; Delete always asks first.</small>")
         th.addWidget(title, 1)
 
         self.left = FilePane(self, "left")
