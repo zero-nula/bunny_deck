@@ -15,9 +15,9 @@ from PyQt6.QtWidgets import (
     QPushButton, QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import colorschemes, keysetup, mainthread, shortcuts, sshconfig, sshmux
+from . import colorschemes, keysetup, mainthread, session, shortcuts, sshconfig, sshmux
 from .config import (
-    KIND_LOCAL, Config, Profile, store_background, validate_host,
+    KIND_LOCAL, Config, Profile, store_background, validate_host, validate_user,
 )
 from .dialogs import (
     AddAIToolDialog, AddSSHDialog, AppearanceDialog, CredentialDialog, ImportSSHConfigDialog,
@@ -636,10 +636,86 @@ class MainWindow(QMainWindow):
         event.accept()
 
     def shutdown(self):
+        self.save_session()
         for p in list(self.layout_.panels):
             p.terminate()
         if self.file_manager is not None:
             self.file_manager.shutdown()
+
+    # ----- session: the terminals reopened on the next start ---------------
+
+    def _session_entry(self, panel):
+        profile = panel.profile
+        if profile is self.local_profile:
+            return {"kind": "local"}
+        for tool_id, p in self.ai_profiles.items():
+            if p is profile:
+                return {"kind": "ai", "tool": tool_id}
+        if profile.is_local:
+            return None
+        if self.config.get(profile.id) is not None:
+            return {"kind": "ssh", "profile": profile.id}
+        return {"kind": "ssh", "name": profile.name, "host": profile.host,
+                "user": profile.user, "port": profile.port}
+
+    def _panel_for_entry(self, entry):
+        """Opens the terminal a session entry describes, or None when that
+        is no longer possible (connection or AI tool removed)."""
+        if not isinstance(entry, dict):
+            return None
+        kind = entry.get("kind")
+        if kind == "local":
+            return self.open_local()
+        if kind == "ai":
+            tool = next((t for t in self.config.ai_tools if t.id == entry.get("tool")), None)
+            return self.open_ai(tool) if tool is not None else None
+        if kind == "ssh" and "profile" in entry:
+            profile = self.config.get(entry["profile"])
+            return self.open_profile(profile) if profile is not None else None
+        if kind == "ssh":
+            host = str(entry.get("host") or "")
+            user = str(entry.get("user") or "")
+            if validate_host(host) or validate_user(user):
+                return None
+            try:
+                port = int(entry.get("port") or 22)
+            except (TypeError, ValueError):
+                port = 22
+            return self.open_profile(Profile(name=str(entry.get("name") or host), host=host,
+                                             user=user, port=port))
+        return None
+
+    def save_session(self):
+        try:
+            session.save(session.encode(self.layout_.describe(), self._session_entry,
+                                        self.active_panel))
+        except OSError as e:
+            print(f"bunny-deck: could not save the session: {e}")
+
+    def restore_session(self):
+        """Reopens the terminals of the last session in their arrangement.
+        False if there was nothing to reopen."""
+        data = session.load()
+        if data is None:
+            return False
+        tree, panels = session.decode(data, self._panel_for_entry)
+        if not panels:
+            return False
+        if tree is not None:
+            self.layout_.arrange(tree)
+            # A nested arrangement is custom; otherwise mark the preset in use.
+            self.split_group.setExclusive(False)
+            for b in (self.vsplit_btn, self.hsplit_btn):
+                b.blockSignals(True)
+                b.setChecked(not self.layout_.custom and (b is self.vsplit_btn) ==
+                             (self.layout_.orientation == VERTICAL_SPLIT))
+                b.blockSignals(False)
+            self.split_group.setExclusive(True)
+        active = data.get("active")
+        target = panels[active] if isinstance(active, int) and 0 <= active < len(panels) \
+            else panels[0]
+        self._focus_panel(target)
+        return True
 
     def _confirm(self, title, text, action):
         box = QMessageBox(QMessageBox.Icon.Question, title, title, parent=self)
@@ -765,7 +841,8 @@ def main(argv=None):
     timer.timeout.connect(lambda: None)
 
     window.showMaximized()
-    # Start with a local shell (only in the first instance; a second launch
-    # just raises this window above).
-    window.open_local()
+    # Reopen the last session, or start with a local shell (only in the first
+    # instance; a second launch just raises this window above).
+    if not window.restore_session():
+        window.open_local()
     return app.exec()

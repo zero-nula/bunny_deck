@@ -117,6 +117,55 @@ class SplitLayout(QWidget):
         walk(self.splitter)
         return out
 
+    # ----- saving and restoring the arrangement ----------------------------
+
+    def describe(self):
+        """The arrangement as nested (orientation, sizes, children); the
+        leaves are the panels themselves."""
+        def walk(s):
+            children = []
+            for i in range(s.count()):
+                w = s.widget(i)
+                if isinstance(w, QSplitter):
+                    children.append(walk(w))
+                elif w in self.panels:
+                    children.append(w)
+            return (s.orientation(), s.sizes(), children)
+
+        return walk(self.splitter)
+
+    def arrange(self, tree):
+        """Rebuilds the splitters from a describe()-style tree whose leaves
+        are panels already added with add_panel. Panels are only moved."""
+        built = []  # (splitter, saved sizes)
+
+        def build(splitter, node):
+            orientation, sizes, children = node
+            splitter.setOrientation(orientation)
+            built.append((splitter, sizes))
+            for child in children:
+                if isinstance(child, tuple):
+                    sub = _new_splitter(child[0])
+                    splitter.addWidget(sub)
+                    build(sub, child)
+                else:
+                    splitter.addWidget(child)  # moves it to its place
+                    child.show()
+
+        build(self.splitter, tree)
+        self.custom = any(isinstance(c, tuple) for c in tree[2])
+        self._normalize()
+
+        def apply_sizes():
+            # Saved sizes are scaled to the splitter's current size, so the
+            # proportions are kept in a window of a different size.
+            for s, sizes in built:
+                if self._alive(s) and len(sizes) == s.count() and sum(sizes) > 0:
+                    total = sum(s.sizes()) or sum(sizes)
+                    s.setSizes([max(1, x * total // sum(sizes)) for x in sizes])
+        # After the equalizing that add_panel queued.
+        QTimer.singleShot(0, apply_sizes)
+
     # ----- tree maintenance -----------------------------------------------
 
     def _alive(self, s):

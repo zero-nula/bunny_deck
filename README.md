@@ -133,7 +133,17 @@ New terminals, closing, the file manager, moving between terminals
 all have shortcuts. See [docs/SHORTCUTS.md](docs/SHORTCUTS.md), or press
 `Ctrl+Shift+?` in the app.
 
-Settings are stored in `~/.config/bunny-deck/config.json`. It never contains passwords.
+### Session
+
+When you quit, Bunny Deck remembers which terminals were open and how they
+were arranged (including the divider positions and the active terminal),
+and opens them again on the next start; SSH terminals reconnect. Without a
+saved session it starts with one local terminal. Broadcast, font zoom and
+the file manager are not restored. Connections or AI tools you removed in
+the meantime are left out.
+
+Settings are stored in `~/.config/bunny-deck/config.json`, the session in
+`session.json` next to it. Neither ever contains passwords.
 
 ## Security
 

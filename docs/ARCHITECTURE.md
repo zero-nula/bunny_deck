@@ -39,6 +39,7 @@ bunnydeck/sftp.py          SFTP v3 protocol client over `ssh -s host sftp`
 bunnydeck/askpass.py       in-app SSH_ASKPASS endpoint (private Unix socket)
 bunnydeck/askpass_helper.py   helper executed by ssh; forwards prompts to the app
 bunnydeck/connections.py   SFTP connection pool (UI hooks passed in)
+bunnydeck/session.py       the open terminals and their arrangement, saved on quit
 bunnydeck/shortcuts.py     the keyboard shortcut table (terminal key filter, window, overview)
 bunnydeck/sshmux.py        one shared SSH connection per host (OpenSSH ControlMaster)
 bunnydeck/sshconfig.py     reads hosts from ~/.ssh/config (ssh -G), appends Host entries
@@ -101,6 +102,20 @@ window-wide QShortcuts for when the focus is elsewhere (file manager).
   1 s timer that reads `/proc/<pid>/stat`. Closing sends `SIGHUP`.
   QTermWidget does not report the exit code, so the header shows
   "disconnected" for both a closed and a failed connection.
+
+### Session
+
+`MainWindow.shutdown()` (window closed, SIGTERM/SIGINT) first saves the
+session: `SplitLayout.describe()` gives the splitter tree with orientation,
+sizes and panels, and `session.encode()` turns each panel into what it runs
+— `local`, `ai` (tool id), `ssh` (saved profile id, or name/host/user/port
+for an unsaved connection). It is written atomically to
+`~/.config/bunny-deck/session.json` (`0600`). On start, `main()` calls
+`restore_session()`: every entry is opened as usual (entries whose profile
+or AI tool no longer exists are skipped, and give up their share of the
+space), then `SplitLayout.arrange()` moves the panels into a rebuilt
+splitter tree and applies the saved proportions, scaled to the current size.
+Nothing typed or shown in a terminal is stored.
 
 ### Broadcast
 
