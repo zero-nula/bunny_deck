@@ -15,7 +15,7 @@ KDE Plasma in mind and works on other desktops too.
 - **Your SSH setup just works**: keys, ssh-agent, `~/.ssh/config` and `known_hosts` are used exactly as on the command line, because Bunny Deck runs the system `ssh`. Passwords are asked when needed and never stored.
 - **Key login in a few clicks**: Bunny Deck can create an SSH key, add it to a server, check that it works and add the server to `~/.ssh/config` — and import the hosts you already have there.
 - **One connection per server**: terminals and the file manager share it, so you log in once, and further terminals and the file manager open instantly.
-- **Network scan**: a live map of the devices on your network (router, servers, NAS, printers, phones…) with their open ports, found with `nmap`. Double-click an SSH server to connect to it.
+- **Network scan**: a live map of the devices on your network (router, servers, NAS, printers, phones…) with their open ports, found with `nmap` (install it separately on existing installs, see [Updating](#updating)). Double-click an SSH server to connect to it.
 - **AI menu**: your own list of command line AI assistants (for example `claude`, `codex` or `opencode`), each opened in its own terminal with one click.
 - **Backgrounds**: per connection colour, transparency and an optional background image. A Bunny Deck badge to use as one is in `data/backgrounds/`.
 
@@ -92,6 +92,20 @@ git pull
 
 After a system update that changes QTermWidget's or PyQt6's version, Bunny
 Deck stops with a message asking you to run `./build-native.sh` again.
+
+**Updating to the version with the network scan:** it needs `nmap`, which
+older installs do not have. Run `./install-deps.sh` again, or install it
+directly:
+
+| Distribution | Command |
+|---|---|
+| openSUSE | `sudo zypper install nmap` |
+| Fedora | `sudo dnf install nmap` |
+| Arch Linux | `sudo pacman -S nmap` |
+| Debian / Ubuntu | `sudo apt install nmap` |
+
+Everything else works without it; the Network Scan window shows the command
+for your system until `nmap` is installed.
 
 ## Using it
 
