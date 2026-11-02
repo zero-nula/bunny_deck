@@ -4,7 +4,7 @@ A lightweight, native SSH and SFTP manager for the Linux desktop, built with
 Python 3, Qt 6 (PyQt6), QTermWidget and the system OpenSSH. It is made with
 KDE Plasma in mind and works on other desktops too.
 
-![Bunny Deck with a local terminal and an AI assistant side by side](docs/screenshot.png)
+![Bunny Deck with a local terminal on the left and two SSH terminals with their own background colours on the right](docs/screenshot.png)
 
 ## Features
 
