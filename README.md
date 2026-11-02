@@ -15,6 +15,7 @@ KDE Plasma in mind and works on other desktops too.
 - **Your SSH setup just works**: keys, ssh-agent, `~/.ssh/config` and `known_hosts` are used exactly as on the command line, because Bunny Deck runs the system `ssh`. Passwords are asked when needed and never stored.
 - **Key login in a few clicks**: Bunny Deck can create an SSH key, add it to a server, check that it works and add the server to `~/.ssh/config` — and import the hosts you already have there.
 - **One connection per server**: terminals and the file manager share it, so you log in once, and further terminals and the file manager open instantly.
+- **Network scan**: a live map of the devices on your network (router, servers, NAS, printers, phones…) with their open ports, found with `nmap`. Double-click an SSH server to connect to it.
 - **AI menu**: your own list of command line AI assistants (for example `claude`, `codex` or `opencode`), each opened in its own terminal with one click.
 - **Backgrounds**: per connection colour, transparency and an optional background image. A Bunny Deck badge to use as one is in `data/backgrounds/`.
 
@@ -68,10 +69,10 @@ running it. These are the packages it installs:
 
 | Distribution | Packages |
 |---|---|
-| openSUSE Tumbleweed | `python313-PyQt6` `libqtermwidget6-2` `qtermwidget-data` `openssh-clients` `python313-devel` `python313-PyQt6-devel` `python313-pyqt-builder` `python313-sip6-devel` `qtermwidget-devel` `qt6-base-common-devel` `gcc-c++` `make` `pkg-config` |
-| Fedora | `python3-pyqt6` `qtermwidget` `openssh-clients` `python3-devel` `python3-pyqt6-devel` `PyQt-builder` `sip6` `qtermwidget-devel` `qt6-qtbase-devel` `gcc-c++` `make` `pkgconf-pkg-config` |
-| Arch Linux | `python-pyqt6` `qtermwidget` `openssh` `sip` `pyqt-builder` `qt6-base` `base-devel` `pkgconf` |
-| Debian | `python3-pyqt6` `libqtermwidget6-2` `openssh-client` `python3-dev` `pyqt6-dev` `sip-tools` `python3-pyqtbuild` `libqtermwidget-dev` `qt6-base-dev` `qmake6` `build-essential` `pkg-config` |
+| openSUSE Tumbleweed | `python313-PyQt6` `libqtermwidget6-2` `qtermwidget-data` `openssh-clients` `nmap` `python313-devel` `python313-PyQt6-devel` `python313-pyqt-builder` `python313-sip6-devel` `qtermwidget-devel` `qt6-base-common-devel` `gcc-c++` `make` `pkg-config` |
+| Fedora | `python3-pyqt6` `qtermwidget` `openssh-clients` `nmap` `python3-devel` `python3-pyqt6-devel` `PyQt-builder` `sip6` `qtermwidget-devel` `qt6-qtbase-devel` `gcc-c++` `make` `pkgconf-pkg-config` |
+| Arch Linux | `python-pyqt6` `qtermwidget` `openssh` `nmap` `sip` `pyqt-builder` `qt6-base` `base-devel` `pkgconf` |
+| Debian | `python3-pyqt6` `libqtermwidget6-2` `openssh-client` `nmap` `python3-dev` `pyqt6-dev` `sip-tools` `python3-pyqtbuild` `libqtermwidget-dev` `qt6-base-dev` `qmake6` `build-essential` `pkg-config` |
 | Ubuntu | as Debian, with `libqtermwidget6-2-dev` instead of `libqtermwidget-dev` |
 
 On openSUSE, the `python313-` prefix follows your Python version; the script
@@ -80,7 +81,7 @@ picks the right one.
 On another distribution, install the equivalents by hand: PyQt6 including its
 `.sip` files, QTermWidget 2 for Qt 6 (library and headers), SIP 6
 (`sip-build`), PyQt-builder, Qt 6 `qmake`, a C++ compiler, `make` and the
-OpenSSH client. Then run `./install.sh`.
+OpenSSH client; `nmap` for the network scan (optional). Then run `./install.sh`.
 
 ### Updating
 
@@ -111,6 +112,10 @@ Deck stops with a message asking you to run `./build-native.sh` again.
 - **⇉ Broadcast** (or Ctrl+Shift+B): each terminal gets a tick box; tick the ones that should take part. What you type in a ticked terminal — keys, Enter, Ctrl+C, pastes — goes to every ticked terminal.
   Nothing is ticked when you turn it on. Ticked terminals have an orange frame, and the button shows how many there are.
   Broadcast is always off when Bunny Deck starts.
+- **Scan Network** (or Ctrl+Shift+M): opens a map of your network. Your network is filled in; press **Scan**.
+  Devices pop up around the router as `nmap` finds them, then their open ports are checked. The icon and colour show what a device seems to be (SSH server, NAS, printer, router, Windows computer, camera, phone…); a green `>_` badge means you can SSH into it.
+  Click a device for its address, manufacturer and open ports; **Connect with SSH…** (or a double-click) opens the Add SSH dialog filled in, **Open in browser** opens its web interface.
+  `nmap` runs as your user, never as root, and only on the network you choose. Only scan networks you own or are allowed to scan.
 - **Vertical Split** puts terminals side by side. **Horizontal Split** stacks them top to bottom.
   You can drag the dividers. Adding or closing a terminal re-balances the layout.
 - **Remove Connection** (top right): pick a saved profile and confirm to remove it. Open sessions keep running.
@@ -161,6 +166,7 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - Synchronisation and transfer queues are not implemented. Symbolic links inside copied folders are left out.
 - The shared connection is started by a terminal. If you open the file manager for a server without a terminal to it, it connects (and asks for a password) on its own.
 - The terminal header cannot tell a failed connection from a closed one (QTermWidget does not report the exit code).
+- The network scan runs without root, so it uses TCP connect scans and checks a list of about 40 common ports, not all 65535. Devices that ignore pings are still found on your own network segment (through the kernel's ARP table), but not behind a router.
 - Window transparency needs a compositing desktop (KDE Plasma, GNOME and most Wayland desktops have one).
 
 ## Development

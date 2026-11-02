@@ -45,6 +45,8 @@ bunnydeck/sshmux.py        one shared SSH connection per host (OpenSSH ControlMa
 bunnydeck/sshconfig.py     reads hosts from ~/.ssh/config (ssh -G), appends Host entries
 bunnydeck/keysetup.py      key login setup: create key, authorize it, verify
 bunnydeck/transfer.py      Local/Remote backends and the copy engine
+bunnydeck/netscan.py       network scan: runs nmap, parses its XML, guesses device kinds
+bunnydeck/netmap.py        Network Scan window: the animated map, device list and details
 tests/                     unit tests and GUI tests on Xvfb (run_all.sh)
 ```
 
@@ -215,6 +217,39 @@ As everywhere else, secrets never reach a command line: the new key's
 passphrase is given to `ssh-keygen` and server passwords to `ssh` through
 `SSH_ASKPASS` (`askpass.py`). The server's sshd configuration is never
 changed.
+
+## Network scan
+
+`netscan.py` runs `nmap` with `QProcess`, as the user (never root or sudo),
+in two phases: host discovery (`-sn`) over the chosen network, then a TCP
+connect scan (`-sT -Pn --open`) of a fixed list of common ports on the hosts
+found, optionally with `-sV --version-light`. Both write XML to stdout
+(`-oX -`, with `--stats-every 1s`); `XMLStream` picks complete `<host>` and
+`<taskprogress>` elements out of the stream as it arrives, so devices appear
+while nmap is still running. The target must parse as an IPv4 network of at
+most 4096 addresses and is passed after `--`, so it can never be read as an
+option.
+
+Without root, nmap reports no MAC addresses and misses hosts that ignore its
+TCP probes. After discovery the kernel's neighbour table (`/proc/net/arp`)
+fills both in: MACs of found hosts, and hosts that answered ARP during the
+scan. Manufacturers come from nmap's `nmap-mac-prefixes`; a locally
+administered MAC is shown as a private (randomized) address. This computer's
+networks come from `QNetworkInterface`, the gateway from `/proc/net/route`.
+The device kind (router, SSH server, NAS, printer, …) is a guess from the
+open ports, the gateway address and the manufacturer.
+
+`netmap.py` draws the map with `QGraphicsView`: the router (or this
+computer) as hub at the centre and the other devices by address on rings
+around it. Nodes are `QGraphicsObject`s animated with `QPropertyAnimation`
+(pop-in, ripple, moving when the rings fill up); the background, links,
+radar sweep and the packets travelling to devices being probed are painted
+in `drawBackground`, driven by a 30 fps timer only while a scan runs.
+Connecting emits `connectRequested(host, port, name)`; the main window opens
+its Add SSH dialog with those values.
+
+The tests use `tests/fake_nmap.py`, a stand-in that prints canned XML for a
+test network, so no packets are sent.
 
 ## File manager and SFTP
 

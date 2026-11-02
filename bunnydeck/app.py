@@ -41,6 +41,7 @@ class MainWindow(QMainWindow):
         self.config = config
         self.active_panel = None
         self.file_manager = None
+        self.network_scan = None
         # One unsaved profile shared by all local terminals, so a colour
         # change applies to every open local terminal (like an SSH profile).
         self.local_profile = Profile(name="Local", host="", kind=KIND_LOCAL,
@@ -112,6 +113,13 @@ class MainWindow(QMainWindow):
         self.ai_button.setMenu(self.ai_menu)
         self.rebuild_ai_menu()
         h.addWidget(self.ai_button)
+
+        self.scan_btn = QPushButton("Scan Network")
+        self.scan_btn.setToolTip("Map the devices on your network with nmap (Ctrl+Shift+M)")
+        # May shrink (clipping its text) so the window stays narrow.
+        self.scan_btn.setMinimumWidth(30)
+        self.scan_btn.clicked.connect(self.open_network_scan)
+        h.addWidget(self.scan_btn)
 
         self.broadcast_btn = QPushButton("⇉ Broadcast")
         self.broadcast_btn.setObjectName("broadcastBtn")
@@ -281,8 +289,11 @@ class MainWindow(QMainWindow):
 
     # ----- sessions -------------------------------------------------------
 
-    def add_ssh(self):
+    def add_ssh(self, host="", port=22, name=""):
+        """The Add SSH dialog, optionally filled in (e.g. from the network scan)."""
         dlg = AddSSHDialog(self)
+        if host:
+            dlg.prefill(host, port, name)
         profile, save = dlg.run_for_profile()
         dlg.deleteLater()
         if profile is None:
@@ -294,6 +305,24 @@ class MainWindow(QMainWindow):
 
     def open_local(self):
         return self.open_profile(self.local_profile)
+
+    # ----- network scan ---------------------------------------------------
+
+    def open_network_scan(self):
+        from .netmap import NetworkScanWindow
+
+        if self.network_scan is None:
+            self.network_scan = NetworkScanWindow(self)
+            self.network_scan.connectRequested.connect(self._connect_from_scan)
+        self.network_scan.show()
+        self.network_scan.raise_()
+        self.network_scan.activateWindow()
+        return self.network_scan
+
+    def _connect_from_scan(self, host, port, name):
+        self.raise_()
+        self.activateWindow()
+        self.add_ssh(host, port, name)
 
     # ----- AI assistants --------------------------------------------------
 
@@ -387,6 +416,8 @@ class MainWindow(QMainWindow):
             self.saved_button.showMenu()
         elif action == "broadcast":
             self.broadcast_btn.toggle()
+        elif action == "network-scan":
+            self.open_network_scan()
         elif action == "help":
             dlg = ShortcutsDialog(self, shortcuts.OVERVIEW)
             dlg.exec()
@@ -642,6 +673,9 @@ class MainWindow(QMainWindow):
             p.terminate()
         if self.file_manager is not None:
             self.file_manager.shutdown()
+        if self.network_scan is not None:
+            self.network_scan.scanner.stop()
+            self.network_scan.close()
 
     # ----- session: the terminals reopened on the next start ---------------
 

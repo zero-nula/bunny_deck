@@ -28,6 +28,7 @@ KEYS = {
     (CS, K.Key_O): "saved-menu",
     (CS, K.Key_W): "close",
     (CS, K.Key_F): "files",
+    (CS, K.Key_M): "network-scan",
     (CS, K.Key_Question): "help",
     (CTRL, K.Key_Question): "help",
     (CS, K.Key_Slash): "help",
@@ -54,6 +55,7 @@ OVERVIEW = [
         ("Ctrl+Shift+W", "Close the current terminal"),
         ("Ctrl+Shift+F", "File manager for the current terminal / back"),
         ("Ctrl+Shift+B", "Broadcast on / off"),
+        ("Ctrl+Shift+M", "Network scan (map of your network)"),
     ]),
     ("Moving", [
         ("Alt+← → ↑ ↓", "Terminal to the left, right, above, below"),

@@ -209,3 +209,76 @@ QPushButton#deleteBtn:hover {
     background-color: #8a2d2b;
     color: #ffffff;
 }
+
+/* Network Scan window */
+#netScanRoot {
+    background-color: #0a0b0d;
+}
+
+#netSide {
+    background-color: #0d0f13;
+    border-left: 1px solid #1f232a;
+}
+
+#netHeading {
+    font-weight: bold;
+    color: #e6e9ef;
+}
+
+#netList {
+    background-color: #0a0b0d;
+    border: 1px solid #1f232a;
+    border-radius: 4px;
+}
+
+#netList::item {
+    padding: 4px 2px;
+}
+
+#netList::item:selected {
+    background-color: #1a2436;
+    color: #ffffff;
+}
+
+#netDetails {
+    background-color: #0a0b0d;
+    border: 1px solid #1f232a;
+    border-radius: 4px;
+    padding: 8px;
+}
+
+#nmapMissing {
+    background-color: #2a1f0e;
+    border-bottom: 1px solid #5c4318;
+}
+
+#scanProgress {
+    border: none;
+    background-color: #12161c;
+}
+
+#scanProgress::chunk {
+    background-color: #3ddc84;
+}
+
+#scanBtn {
+    background-color: #1d3b2a;
+    border: 1px solid #3ddc84;
+    color: #ffffff;
+    padding: 3px 18px;
+    border-radius: 4px;
+}
+
+#scanBtn:hover {
+    background-color: #24503a;
+}
+
+#scanBtn:disabled {
+    background-color: #15181d;
+    border-color: #1f232a;
+    color: #6b7280;
+}
+
+#netScanRoot QPushButton:disabled {
+    color: #4b5260;
+}

@@ -74,6 +74,12 @@ class AddSSHDialog(QDialog):
         v.addWidget(self.error)
         v.addWidget(buttons)
 
+    def prefill(self, host, port=22, name=""):
+        self.host.setText(host)
+        self.port.setValue(port)
+        self.name.setText(name)
+        self.user.setFocus()
+
     def accept(self):
         host = self.host.text().strip()
         user = self.user.text().strip()

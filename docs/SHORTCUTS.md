@@ -16,6 +16,7 @@ therefore still reach the programs running in the terminal.
 | `Ctrl+Shift+W` | Close the current terminal (asks first if its session is still running) |
 | `Ctrl+Shift+F` | Open the file manager for the current terminal; press again to go back |
 | `Ctrl+Shift+B` | Turn Broadcast on or off (type into several terminals at once) |
+| `Ctrl+Shift+M` | Open the Network Scan window (a map of the devices on your network) |
 
 ## Moving between terminals
 
