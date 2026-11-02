@@ -17,7 +17,7 @@ from PyQt6.QtCore import QTimer  # noqa: E402
 from PyQt6.QtGui import QColor, QImage  # noqa: E402
 
 from bunnydeck.config import (  # noqa: E402
-    DEFAULT_BACKGROUND, LOCAL_BACKGROUND_IMAGE, AITool, Appearance, Config, backgrounds_dir,
+    DEFAULT_BACKGROUND, AITool, Appearance, Config, backgrounds_dir,
 )
 from bunnydeck.dialogs import AppearanceDialog  # noqa: E402
 
@@ -57,8 +57,8 @@ def test(app):
     local = win.open_local()
     check(local.appearance_btn.text() == "Background", "header button is called Background")
     yield lambda: local.child_pid
-    check(local.appearance.image == LOCAL_BACKGROUND_IMAGE and local._bg_file,
-          "local terminal shows the bunny badge by default")
+    check(local.appearance.image == "" and not local._bg_file,
+          "local terminal has no background image by default")
     yield from edit_background(local, red)
     check(pixel(win, local) == ("#c03030", 255), f"image shown (stretch) {pixel(win, local)}")
     stored = Config(app.config.path).local_appearance
@@ -122,13 +122,13 @@ def test(app):
     check(pixel(win, ssh) == (DEFAULT_BACKGROUND, 255), "Reset to Default removes the image")
     check(Config(app.config.path).get(prof.id).appearance.image == "", "reset saved")
 
-    # For a local terminal, Reset to Default brings the bunny badge back.
+    # For a local terminal, Reset to Default also means no image.
     QTimer.singleShot(0, local.appearance_btn.click)
     yield lambda: find_top(AppearanceDialog)
     d = find_top(AppearanceDialog)
     d.reset()
-    check(d.current().image == LOCAL_BACKGROUND_IMAGE and d.current().image_mode == "center",
-          "local Reset to Default is the bunny badge")
+    check(d.current().image == "" and d.current().is_default(),
+          "local Reset to Default has no image")
     d.reject()
     yield lambda: find_top(AppearanceDialog) is None
 

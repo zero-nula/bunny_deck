@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
 
 from . import colorschemes, keysetup, mainthread, shortcuts, sshconfig, sshmux
 from .config import (
-    KIND_LOCAL, Config, Profile, default_local_appearance, store_background, validate_host,
+    KIND_LOCAL, Config, Profile, store_background, validate_host,
 )
 from .dialogs import (
     AddAIToolDialog, AddSSHDialog, AppearanceDialog, CredentialDialog, ImportSSHConfigDialog,
@@ -530,9 +530,7 @@ class MainWindow(QMainWindow):
             for p in siblings:
                 p.apply_appearance(appearance)
 
-        default = default_local_appearance() if profile is self.local_profile else None
-        dlg = AppearanceDialog(self, profile, panel.appearance, preview, saveable=saved,
-                               default=default)
+        dlg = AppearanceDialog(self, profile, panel.appearance, preview, saveable=saved)
         if not self.supports_alpha():
             dlg.set_note("No compositing available: opacity below 100 % will not show the "
                          "desktop behind the window.")

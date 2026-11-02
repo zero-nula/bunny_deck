@@ -147,13 +147,11 @@ class AppearanceDialog(QDialog):
 
     RESET = 2
 
-    def __init__(self, parent, profile, appearance, on_preview, saveable=True, default=None):
+    def __init__(self, parent, profile, appearance, on_preview, saveable=True):
         super().__init__(parent)
         self.setWindowTitle(f"Background — {profile.name}")
         self.on_preview = on_preview
         self.original = appearance
-        # What "Reset to Default" restores (local terminals have the bunny).
-        self.default = default or Appearance()
         self.image = appearance.image
 
         self.chooser = QColorDialog(QColor(appearance.background), self)
@@ -258,7 +256,7 @@ class AppearanceDialog(QDialog):
         self.on_preview(self.current())
 
     def reset(self):
-        d = self.default
+        d = Appearance()
         self.chooser.setCurrentColor(QColor(d.background))
         self.opacity.setValue(round(d.opacity * 100))
         self.image = d.image

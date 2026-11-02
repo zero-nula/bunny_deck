@@ -8,8 +8,8 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from bunnydeck.config import (  # noqa: E402
-    AITool, Appearance, Config, Profile, backgrounds_dir, default_local_appearance,
-    store_background, validate_host, validate_user,
+    AITool, Appearance, Config, Profile, backgrounds_dir, store_background,
+    validate_host, validate_user,
 )
 
 
@@ -62,11 +62,9 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual((a.image, a.image_mode), ("", "fill"))
         self.assertFalse(Appearance(image="/a.png").is_default())
 
-    def test_local_default_is_bunny_badge(self):
+    def test_local_default_has_no_image(self):
         c = Config(self.path)
-        self.assertEqual(c.local_appearance, default_local_appearance())
-        self.assertTrue(os.path.isfile(c.local_appearance.image))
-        self.assertEqual(c.local_appearance.image_mode, "center")
+        self.assertEqual(c.local_appearance, Appearance())
         # An explicit choice (also "no image") is kept.
         c.update_local_appearance(Appearance("#000000", 0.9))
         self.assertEqual(Config(self.path).local_appearance, Appearance("#000000", 0.9))

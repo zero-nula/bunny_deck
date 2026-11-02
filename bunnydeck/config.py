@@ -22,10 +22,6 @@ _HEX_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 # How a background image is placed in the terminal (QTermWidget modes).
 IMAGE_MODES = ("fill", "fit", "stretch", "center")
 DEFAULT_IMAGE_MODE = "fill"
-# The bunny badge that local terminals show until the user picks otherwise.
-LOCAL_BACKGROUND_IMAGE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data", "backgrounds", "bunny-skate.png")
 
 # Profile kinds. Profiles written before "kind" existed have none: they are SSH.
 KIND_SSH = "ssh"
@@ -95,11 +91,6 @@ class Appearance:
     def is_default(self):
         return self.background == DEFAULT_BACKGROUND and self.opacity == DEFAULT_OPACITY \
             and not self.image
-
-
-def default_local_appearance():
-    """Default for local terminals: the default colour with the bunny badge."""
-    return Appearance(image=LOCAL_BACKGROUND_IMAGE, image_mode="center")
 
 
 @dataclass
@@ -209,13 +200,13 @@ class Config:
         self.profiles = []
         self.ai_tools = []
         # Appearance shared by all local terminals ("Local terminal").
-        self.local_appearance = default_local_appearance()
+        self.local_appearance = Appearance()
         self.load()
 
     def load(self):
         self.profiles = []
         self.ai_tools = []
-        self.local_appearance = default_local_appearance()
+        self.local_appearance = Appearance()
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)

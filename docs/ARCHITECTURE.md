@@ -141,10 +141,10 @@ a resize settles (120 ms) it is composed again. A chosen image is copied to
 `~/.config/bunny-deck/backgrounds/` (named after its content hash) when the
 setting is saved.
 
-The default background of local terminals is
 `data/backgrounds/bunny-skate.png`, drawn by `make_bunny_skate.py` in the
-same directory: a transparent, dim badge shown in Center mode, so it suits
-any background colour.
+same directory, is an optional background: a transparent, dim badge meant
+for Center mode, so it suits any background colour. No terminal uses it
+unless chosen.
 
 ## Shared connections
 

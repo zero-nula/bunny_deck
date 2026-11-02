@@ -16,7 +16,7 @@ KDE Plasma in mind and works on other desktops too.
 - **Key login in a few clicks**: Bunny Deck can create an SSH key, add it to a server, check that it works and add the server to `~/.ssh/config` — and import the hosts you already have there.
 - **One connection per server**: terminals and the file manager share it, so you log in once, and further terminals and the file manager open instantly.
 - **AI menu**: your own list of command line AI assistants (for example `claude`, `codex` or `opencode`), each opened in its own terminal with one click.
-- **Backgrounds**: per connection colour, transparency and an optional background image. Local terminals come with the Bunny Deck badge.
+- **Backgrounds**: per connection colour, transparency and an optional background image. A Bunny Deck badge to use as one is in `data/backgrounds/`.
 
 ## Installation
 
