@@ -15,8 +15,14 @@ for t in "${@:-tests/gui_phase*.py}"; do
     # fresh, throwaway config directory per suite
     export XDG_CONFIG_HOME
     XDG_CONFIG_HOME=$(mktemp -d /tmp/bunnydeck-test-cfg-XXXXXX)
+    # -X faulthandler: a crash prints where it happened.
     env -u WAYLAND_DISPLAY QT_QPA_PLATFORM=xcb DISPLAY="$DISP" NO_AT_BRIDGE=1 \
-      python3 "$f" || rc=1
+      python3 -X faulthandler "$f" 2>&1
+    code=$?
+    if [ "$code" != 0 ]; then
+      echo "  FAIL $f exited with code $code"
+      rc=1
+    fi
     rm -rf "$XDG_CONFIG_HOME"
   done
 done
