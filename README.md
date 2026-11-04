@@ -12,6 +12,7 @@ KDE Plasma in mind and works on other desktops too.
 - **Saved connections**: name, host or `~/.ssh/config` alias, user and port. Any number of sessions per connection.
 - **Broadcast**: type a command once and run it in several terminals at the same time, for example an update on five servers.
 - **Integrated SFTP file manager** for each session, with two panes: Local ↔ Remote and Remote ↔ Remote, with drag and drop.
+- **Edit server files in your own editor**: double-click a file on a server and it opens in Kate, Zed, VS Code or whichever editor you use; every save goes straight back to the server.
 - **Your SSH setup just works**: keys, ssh-agent, `~/.ssh/config` and `known_hosts` are used exactly as on the command line, because Bunny Deck runs the system `ssh`. Passwords are asked when needed and never stored.
 - **Key login in a few clicks**: Bunny Deck can create an SSH key, add it to a server, check that it works and add the server to `~/.ssh/config` — and import the hosts you already have there.
 - **One connection per server**: terminals and the file manager share it, so you log in once, and further terminals and the file manager open instantly.
@@ -153,6 +154,10 @@ The other toolbar buttons are icons; hover over one to see its name and shortcut
   - An existing target is never silently replaced: you choose Replace, Skip, Replace All or Cancel.
   - **Folders** are copied with everything in them, in every direction (also Remote ↔ Remote). If the folder already exists in the target, you are asked once whether to copy into it; files that exist in both are then asked about as above.
   - Symbolic links and special files (pipes, sockets, devices) inside folders are not copied; the summary says how many were left out.
+  - **Edit a file**: double-click a text file (or right-click → **Edit**) to open it in your editor. A file on a server is downloaded into a private folder, and **every time you save it in the editor it is uploaded again** — the status bar says *Saved nginx.conf to Ubuntu*. If the file was changed (or deleted) on the server since you opened it, Bunny Deck asks before replacing it. A symbolic link edits the file it points to, and the server file keeps its permissions. Opening the same file again shows the copy that is already open. Files on this computer open where they are.
+    - Double-clicking other files: on this computer they open in their usual application; on a server, right-click → **Edit** opens them anyway (after a warning if they do not look like text).
+    - **Which editor**: by default the one your desktop uses for text files (KDE: *System Settings → Default Applications / File Associations*). Right-click → **Default Editor ▸** chooses another one for Bunny Deck only: it lists the text editors installed on this computer (Kate, Zed, VSCodium, gedit…, also Flatpaks) and **Custom Command…** for anything else, for example `konsole -e nvim` (the file is added at the end, or where you put `%f`). **Edit With ▸** uses another editor just once.
+    - The local copies are in `~/.cache/bunny-deck/edit/` and are removed when Bunny Deck quits. A copy whose last changes did not reach the server is kept, and quitting asks first.
   - **Delete** (the bin icon or the Delete key) removes the selected files and folders, folders with everything in them. It always asks first, showing how many files and folders will go; **Cancel** is the default. Deleting is permanent (there is no trash). A symbolic link is removed itself, never what it points to, and the root or your home folder (or a folder containing it) is never deleted.
 - **Background**: pick a background colour, opacity and an optional image (Fill, Fit, Stretch or Center) for the profile.
   The change applies live to every session of that profile. **Save** stores it; **Reset to Default** restores the default.
@@ -187,6 +192,7 @@ Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Known limitations
 
+- Editing a file uploads it with your own login: files you could only change with `sudo` (for example in `/etc`) cannot be saved this way.
 - Synchronisation and transfer queues are not implemented. Symbolic links inside copied folders are left out.
 - The shared connection is started by a terminal. If you open the file manager for a server without a terminal to it, it connects (and asks for a password) on its own.
 - The terminal header cannot tell a failed connection from a closed one (QTermWidget does not report the exit code).

@@ -831,6 +831,16 @@ class MainWindow(QMainWindow):
         ):
             event.ignore()
             return
+        unsaved = self.file_manager.unsaved_edits() if self.file_manager is not None else []
+        if unsaved and not self._confirm(
+            "Quit Bunny Deck?",
+            "These files have changes that are not saved on their server: "
+            f"{', '.join(unsaved)}. The local copies are kept in "
+            "~/.cache/bunny-deck/edit.",
+            "Quit",
+        ):
+            event.ignore()
+            return
         self.shutdown()
         event.accept()
 

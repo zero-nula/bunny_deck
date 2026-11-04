@@ -50,6 +50,8 @@ bunnydeck/sshmux.py        one shared SSH connection per host (OpenSSH ControlMa
 bunnydeck/sshconfig.py     reads hosts from ~/.ssh/config (ssh -G), appends Host entries
 bunnydeck/keysetup.py      key login setup: create key, authorize it, verify
 bunnydeck/transfer.py      Local/Remote backends and the copy engine
+bunnydeck/editors.py       installed text editors (.desktop files), the default one, their command lines
+bunnydeck/remoteedit.py    editing a server's file in a local editor: download, watch, upload on save
 bunnydeck/netscan.py       network scan: runs nmap, parses its XML, guesses device kinds
 bunnydeck/netmap.py        Network Scan window: the animated map, device list and details
 tests/                     unit tests and GUI tests on Xvfb (run_all.sh)
@@ -333,6 +335,39 @@ selected folders can be touched. `transfer.protected` refuses the root
 and the home folder or any folder containing it, before anything is asked.
 Deleting stops at the first error of an item and can be cancelled; what was
 removed until then stays removed.
+
+### Editing files
+
+`editors.py` finds the text editors the way desktops find applications:
+the `.desktop` files in `$XDG_DATA_HOME/applications` and every
+`$XDG_DATA_DIRS/*/applications` (which includes Flatpak exports), the user's
+own entry winning. An entry is an editor when it opens `text/plain`, is in the
+`TextEditor` or `IDE` category (LibreOffice and browsers also open text), is
+not `NoDisplay` or `Terminal=true`, and its program exists. The desktop's
+default is `xdg-mime query default text/plain`, deliberately not the default
+for the file's own type: a `.sh` must not be run and an `.xml` must not open
+in a browser. The command line is the entry's `Exec` with its field codes
+expanded (`%f %F %u %U` → the file, `%i`, `%c`, `%k`); it is started with
+`QProcess.startDetached`, never through a shell. Bunny Deck's own choice is
+`editor` in `config.json`: `""` (the desktop's default),
+`desktop:<id>` or `command:<command line>`.
+
+`remoteedit.py` keeps one `EditSession` per remote file (keyed by the
+connection and the server's `realpath`, so a symlink edits its target and is
+never replaced by a file). Opening downloads the file into its own `0700`
+folder `$XDG_CACHE_HOME/bunny-deck/edit/<connection>-<random>/<name>` (file
+`0600`) and starts the editor; files over 20 MB and files with a NUL byte
+in the first 8 KiB are only opened after a question. A
+`QFileSystemWatcher` watches the file *and* its folder: many editors save by
+renaming a new file over the old one, which ends the watch on the file. Events
+are collected for 300 ms; the content's SHA-256 decides whether anything
+changed. Then the server's `(mtime, size)` is compared with what it was after
+the last download or upload: if it differs (or the file is gone) the user is
+asked, with Cancel as default. The upload is the usual `upload()` (part file
+renamed into place, the file's permissions kept) over the pool's connection,
+which reconnects if needed. A save during an upload is handled after it.
+On quit, copies the server has are removed; a copy with changes the server
+lacks is kept, and closing the window asks first.
 
 ### Safe writes
 

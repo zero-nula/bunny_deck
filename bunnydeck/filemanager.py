@@ -5,21 +5,23 @@ with mainthread.call_soon. Delete always asks first.
 """
 
 import json
+import os
 import threading
 import time
 
-from PyQt6.QtCore import QEvent, QMimeData, QMimeDatabase, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QIcon
+from PyQt6.QtCore import QEvent, QMimeData, QMimeDatabase, QProcess, QSize, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QActionGroup, QColor, QDesktopServices, QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
-    QInputDialog, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton, QStackedWidget,
-    QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
+    QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QProgressBar, QPushButton,
+    QStackedWidget, QToolButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
-from . import icons, sftp, theme
+from . import editors, icons, sftp, theme
 from .connections import ConnectionPool, run_on_main_sync
 from .dialogs import CredentialDialog
 from .mainthread import call_soon
+from .remoteedit import RemoteEdits
 from .transfer import (
     LocalBackend, RemoteBackend, TransferError, copy_file, count_tree, delete_path, inside,
     plan_folder, protected, same_place,
@@ -73,6 +75,14 @@ def file_icon(name):
             icon = _icon("text-x-generic", "text-x-generic-symbolic")
         _icon_cache[key] = icon
     return _icon_cache[key]
+
+
+def is_text_name(name):
+    """Whether a file name suggests text, so a double-click opens it in the
+    editor. Names without a known type (hosts, .bashrc, nginx.conf) are
+    usually configuration files and count as text."""
+    mime = _mimes.mimeTypeForFile(name, QMimeDatabase.MatchMode.MatchExtension)
+    return mime.isDefault() or mime.inherits("text/plain")
 
 
 def friendly_time(mtime, now=None):
@@ -202,6 +212,9 @@ class FileList(QTreeWidget):
         self.setDropIndicatorShown(False)
         self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
         self.setDefaultDropAction(Qt.DropAction.CopyAction)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(
+            lambda pos: pane.fm.show_file_menu(pane, self.viewport().mapToGlobal(pos)))
         h = self.header()
         h.setStretchLastSection(False)
         h.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
@@ -498,6 +511,12 @@ class FilePane(QWidget):
     def _on_item_activated(self, item, column):
         if item.data(0, ROLE_ISDIR):
             self.load(self.backend.join(self.cwd, item.text(0)))
+        elif self.backend is not None and self.cwd is not None:
+            self.fm.open_file(self, item.text(0))
+
+    def selected_files(self):
+        """Names of the selected items that are not folders."""
+        return [it.text(0) for it in self.view.selectedItems() if not it.data(0, ROLE_ISDIR)]
 
     def names(self):
         return [self.view.topLevelItem(i).text(0) for i in range(self.view.topLevelItemCount())]
@@ -590,6 +609,7 @@ class FileManager(QWidget):
         super().__init__()
         self.window = window
         self.pool = ConnectionPool(call_soon, self._ask_credentials)
+        self.edits = RemoteEdits(self.pool, self)
         self._extra_profiles = {}
         self._cancel = None
         self.setObjectName("fmRoot")
@@ -603,7 +623,8 @@ class FileManager(QWidget):
         title = QLabel("Files")
         title.setObjectName("fmTitle")
         hint = QLabel("Copy between this computer and your servers, or between two servers. "
-                      "Files are copied, never moved; Delete always asks first.")
+                      "Double-click a text file to edit it: every save goes back to the server. "
+                      "Delete always asks first.")
         hint.setObjectName("dimLabel")
         hint.setWordWrap(True)
         back = QPushButton("Back to terminals")
@@ -1092,6 +1113,164 @@ class FileManager(QWidget):
             self.message("Some files were not copied", "\n".join(r.errors[:15]) + more,
                          error=True)
 
+    # ----- editing --------------------------------------------------------
+
+    def open_file(self, pane, name):
+        """Double-click on a file: text files open in the editor; other
+        files on this computer open in their usual application."""
+        if is_text_name(name):
+            self.edit_file(pane, name)
+        elif not pane.backend.is_remote:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(pane.backend.join(pane.cwd, name)))
+        else:
+            self.notify(f"{name} is not a text file. Right-click it and choose Edit to open "
+                        "it in the editor anyway, or copy it to this computer.")
+
+    def edit_file(self, pane, name, editor=None):
+        """Opens a file in the editor (Bunny Deck's choice unless one is
+        given). A file on a server is downloaded, and every save in the
+        editor is uploaded again (remoteedit.py)."""
+        backend = pane.backend
+        if backend is None or pane.cwd is None:
+            return
+        path = backend.join(pane.cwd, name)
+        if not backend.is_remote:
+            error = self.launch(path, editor)
+            if error:
+                self.message("Cannot open the editor", error, error=True)
+            return
+        profile = self.profile_for(pane.source_id)
+        if profile is None:
+            return
+        self.edits.open(profile, backend.client, path, editor)
+
+    def launch(self, path, editor=None):
+        """Starts the editor on a local file; None, or an error message."""
+        editor = editor or editors.resolve(self.window.config.editor)
+        if editor is None:
+            return ("No text editor was found. Right-click a file and choose "
+                    "Default Editor ▸ Custom Command… to enter one.")
+        try:
+            argv = editors.command_for(editor, path)
+        except ValueError as e:
+            return f"The command of {editor.name} cannot be read: {e}"
+        ok, _pid = QProcess.startDetached(argv[0], argv[1:], os.path.dirname(path))
+        return None if ok else f"{editor.name} could not be started ({argv[0]})."
+
+    def ask(self, title, text, informative, yes_label):
+        """A question with a safe default (Cancel); True for yes_label."""
+        box = QMessageBox(QMessageBox.Icon.Warning, title, text, parent=self.window)
+        box.setInformativeText(informative)
+        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+        yes = box.addButton(yes_label, QMessageBox.ButtonRole.AcceptRole)
+        box.setDefaultButton(cancel)
+        box.setEscapeButton(cancel)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def notify(self, text, error=False):
+        self.status.setText(text.split("\n", 1)[0])
+        if error:
+            self.message("Editing a file", text, error=True)
+
+    def show_file_menu(self, pane, global_pos):
+        files = pane.selected_files() if pane.backend is not None else []
+        menu = QMenu(self)
+        found = editors.find_editors()
+        if len(files) == 1:
+            name = files[0]
+            edit = menu.addAction(QIcon.fromTheme("document-edit"), "Edit")
+            f = edit.font()
+            f.setBold(True)
+            edit.setFont(f)
+            edit.triggered.connect(lambda: self.edit_file(pane, name))
+            with_ = menu.addMenu("Edit With")
+            for e in found:
+                with_.addAction(QIcon.fromTheme(e.icon), e.name).triggered.connect(
+                    lambda _=False, e=e: self.edit_file(pane, name, e))
+            if found:
+                with_.addSeparator()
+            with_.addAction("Other Command…").triggered.connect(
+                lambda: self._edit_with_command(pane, name))
+            if not pane.backend.is_remote and not is_text_name(name):
+                menu.addAction("Open").triggered.connect(lambda: QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(pane.backend.join(pane.cwd, name))))
+            menu.addSeparator()
+        self._fill_default_editor_menu(menu.addMenu("Default Editor"), found)
+        if pane.selected_names():
+            menu.addSeparator()
+            menu.addAction(icons.icon("trash"), "Delete…").triggered.connect(
+                lambda: self.delete_selection(pane))
+        menu.exec(global_pos)
+        menu.deleteLater()
+
+    def _fill_default_editor_menu(self, menu, found):
+        """Bunny Deck's own editor choice; the desktop's settings are not
+        changed."""
+        current = self.window.config.editor
+        group = QActionGroup(menu)
+
+        def option(text, choice, tip=None):
+            a = menu.addAction(text)
+            a.setCheckable(True)
+            a.setChecked(choice == current)
+            if tip:
+                a.setToolTip(tip)
+            group.addAction(a)
+            a.triggered.connect(lambda: self.set_default_editor(choice))
+            return a
+
+        default = editors.system_default(found)
+        option(f"System Default ({default.name})" if default else "System Default",
+               editors.SYSTEM)
+        for e in found:
+            option(e.name, e.choice).setIcon(QIcon.fromTheme(e.icon))
+        menu.addSeparator()
+        custom = current[len(editors.COMMAND_PREFIX):] \
+            if current.startswith(editors.COMMAND_PREFIX) else ""
+        a = menu.addAction(f"Custom Command: {custom}…" if custom else "Custom Command…")
+        a.setCheckable(True)
+        a.setChecked(bool(custom))
+        group.addAction(a)
+        a.triggered.connect(self.ask_custom_editor)
+        menu.setToolTipsVisible(True)
+
+    def set_default_editor(self, choice):
+        self.window.config.set_editor(choice)
+        e = editors.resolve(choice)
+        self.status.setText(f"Files open in {e.name}" if e else "No text editor found")
+
+    def _ask_command(self, title):
+        """A command line for an editor, checked; None when cancelled."""
+        current = self.window.config.editor
+        text = current[len(editors.COMMAND_PREFIX):] \
+            if current.startswith(editors.COMMAND_PREFIX) else ""
+        while True:
+            text, ok = QInputDialog.getText(
+                self.window, title, "Command that opens a file, for example “kate” or "
+                "“konsole -e nvim”.\nThe file is added at the end, or where you put %f.",
+                text=text)
+            if not ok:
+                return None
+            error = editors.check_command(text.strip())
+            if error is None:
+                return text.strip()
+            self.message("Cannot use this command", error, error=True)
+
+    def ask_custom_editor(self):
+        cmd = self._ask_command("Custom Editor")
+        if cmd is not None:
+            self.set_default_editor(editors.COMMAND_PREFIX + cmd)
+
+    def _edit_with_command(self, pane, name):
+        cmd = self._ask_command("Edit With")
+        if cmd is not None:
+            self.edit_file(pane, name, editors.resolve(editors.COMMAND_PREFIX + cmd))
+
+    def unsaved_edits(self):
+        """Names of files being edited whose last changes are not on their server."""
+        return [s.name for s in self.edits.sessions if s.unsaved or s.busy]
+
     # ----- misc -----------------------------------------------------------
 
     def message(self, title, text, error=False):
@@ -1103,4 +1282,6 @@ class FileManager(QWidget):
     def shutdown(self):
         if self._cancel is not None:
             self._cancel.set()
+        for path in self.edits.shutdown():
+            print(f"bunny-deck: kept {path}: its last changes are not on the server")
         self.pool.close_all()

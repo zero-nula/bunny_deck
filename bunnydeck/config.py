@@ -210,6 +210,9 @@ class Config:
         self.local_appearance = Appearance()
         self.recent = []  # profile ids, most recently opened first
         self.sidebar_visible = True
+        # The editor for "Edit" in the file manager (see editors.py): ""
+        # is the desktop's default for text files.
+        self.editor = ""
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -237,6 +240,8 @@ class Config:
         if isinstance(recent, list):
             self.recent = [r for r in recent if isinstance(r, str) and r in ids][:RECENT_MAX]
         self.sidebar_visible = data.get("sidebar_visible", True) is not False
+        editor = data.get("editor", "")
+        self.editor = editor if isinstance(editor, str) else ""
 
     def save(self):
         if getattr(self, "_broken", False):
@@ -249,7 +254,8 @@ class Config:
         data = {"version": 1, "profiles": [p.to_dict() for p in self.profiles],
                 "ai_tools": [t.to_dict() for t in self.ai_tools],
                 "local_appearance": asdict(self.local_appearance),
-                "recent": self.recent, "sidebar_visible": self.sidebar_visible}
+                "recent": self.recent, "sidebar_visible": self.sidebar_visible,
+                "editor": self.editor}
         fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path), prefix=".config-")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -296,6 +302,10 @@ class Config:
 
     def set_sidebar_visible(self, visible):
         self.sidebar_visible = bool(visible)
+        self.save()
+
+    def set_editor(self, choice):
+        self.editor = choice or ""
         self.save()
 
     def update_appearance(self, profile_id, appearance):
