@@ -43,14 +43,14 @@ QPushButton:checked {
     color: #ffffff;
 }
 
-QPushButton:default, QPushButton#primaryBtn {
+QDialogButtonBox QPushButton:default, QPushButton#primaryBtn {
     background-color: #2f5fbf;
     border-color: #3f70d4;
     color: #ffffff;
     font-weight: bold;
 }
 
-QPushButton:default:hover, QPushButton#primaryBtn:hover {
+QDialogButtonBox QPushButton:default:hover, QPushButton#primaryBtn:hover {
     background-color: #3a6cd0;
 }
 
@@ -141,8 +141,9 @@ QMenu::separator {
     letter-spacing: 1px;
 }
 
-#sidebarList {
+#sidebarList, #sidebarList:focus {
     background-color: transparent;
+    border: none;
     outline: 0;
 }
 
@@ -344,6 +345,13 @@ QSplitter::handle:hover {
     font-weight: bold;
 }
 
+/* user@host: readable at a glance, a step below the name. */
+#termHeader QLabel#termTarget {
+    color: #9aa3b0;
+    font-family: monospace;
+    padding-left: 2px;
+}
+
 #statusDot {
     font-size: 9px;
 }
@@ -402,6 +410,32 @@ QSplitter::handle:hover {
     background: transparent;
 }
 
+/* Held by its header to be moved: the whole terminal lights up. */
+#termPanel[grabbed="true"], #termPanel[grabbed="true"][active="true"],
+#termPanel[grabbed="true"][broadcast="true"] {
+    border: 2px solid #5b8def;
+}
+
+#termPanel[grabbed="true"] #termHeader,
+#termPanel[grabbed="true"][broadcast="true"] #termHeader {
+    background-color: #2f5fbf;
+}
+
+#termPanel[grabbed="true"] #termHeader QLabel,
+#termPanel[grabbed="true"] #termHeader QLabel#termTarget,
+#termPanel[grabbed="true"] #termHeader QLabel#termStatus {
+    color: #dce6fb;
+}
+
+#grabTint {
+    background-color: rgba(91, 141, 239, 0.16);
+    border: 2px solid #5b8def;
+}
+
+#termPanel[grabbed="true"] #termHeader QLabel#termName {
+    color: #ffffff;
+}
+
 /* Broadcast: ticked terminals and the toolbar button turn orange. */
 #termPanel[broadcast="true"], #termPanel[broadcast="true"][active="true"] {
     border-color: #e8913a;
@@ -422,6 +456,7 @@ QSplitter::handle:hover {
 
 #termHeader QCheckBox#broadcastBox::indicator:checked {
     background-color: #e8913a;
+    image: url(@HERE@/check.svg);
 }
 
 #deckToolbar QToolButton#broadcastBtn:checked {
@@ -645,4 +680,166 @@ QToolButton#copyBtn:disabled {
 #fmProgress::chunk {
     border-radius: 3px;
     background-color: #5b8def;
+}
+
+/* ----- Polish: dialogs, check boxes, scroll bars, tool tips ---------------- */
+
+QToolTip {
+    padding: 5px 8px;
+    border: 1px solid #2c323c;
+    border-radius: 6px;
+}
+
+#dialogTitle {
+    font-size: 16px;
+    font-weight: bold;
+    color: #e6e9ef;
+}
+
+#sectionTitle {
+    color: #6b7280;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+QLabel#keycap {
+    background-color: #1d2128;
+    border: 1px solid #323844;
+    border-bottom: 2px solid #323844;
+    border-radius: 5px;
+    padding: 1px 7px;
+    color: #e6e9ef;
+    font-size: 11px;
+}
+
+QToolButton#swatch, QToolButton#swatchCustom {
+    border: 2px solid #262b33;
+    border-radius: 15px;
+}
+
+QToolButton#swatch:hover, QToolButton#swatchCustom:hover {
+    border-color: #4b5260;
+}
+
+QToolButton#swatch:checked {
+    border: 2px solid #5b8def;
+}
+
+QToolButton#swatchCustom {
+    background-color: #16191e;
+    color: #9aa3b2;
+    font-size: 16px;
+    font-weight: bold;
+}
+
+QLabel#imageThumb {
+    background-color: #0e1013;
+    border: 1px solid #262b33;
+    border-radius: 6px;
+    color: #4b5260;
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    background-color: #262b33;
+    border-radius: 2px;
+}
+
+QSlider::sub-page:horizontal {
+    background-color: #5b8def;
+    border-radius: 2px;
+}
+
+QSlider::handle:horizontal {
+    background-color: #e6e9ef;
+    border: 2px solid #5b8def;
+    width: 12px;
+    height: 12px;
+    margin: -6px 0;
+    border-radius: 8px;
+}
+
+QCheckBox::indicator, QListView::indicator, QTreeView::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #3a404b;
+    border-radius: 4px;
+    background-color: #0e1013;
+}
+
+QCheckBox::indicator:hover, QListView::indicator:hover {
+    border-color: #5b8def;
+}
+
+QCheckBox::indicator:checked, QListView::indicator:checked, QTreeView::indicator:checked {
+    background-color: #2f5fbf;
+    border-color: #3f70d4;
+    image: url(@HERE@/check.svg);
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 10px;
+    margin: 0;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #2c323c;
+    min-height: 28px;
+    border-radius: 3px;
+    margin: 2px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background-color: #4b5260;
+}
+
+QScrollBar:horizontal {
+    background: transparent;
+    height: 10px;
+    margin: 0;
+    border: none;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #2c323c;
+    min-width: 28px;
+    border-radius: 3px;
+    margin: 2px;
+}
+
+QScrollBar::add-line, QScrollBar::sub-line, QScrollBar::add-page, QScrollBar::sub-page {
+    width: 0;
+    height: 0;
+    background: transparent;
+}
+
+/* A file pane that cannot show its folder: a card, not just red text. */
+#fmPane QLabel#errorLabel {
+    background-color: #2a1416;
+    border: 1px solid #5c2b2b;
+    border-radius: 8px;
+    color: #f0a0a0;
+}
+
+#fmPane QLabel#dimLabel {
+    padding: 4px 12px;
+}
+
+QListWidget {
+    background-color: #0e1013;
+    border: 1px solid #262b33;
+    border-radius: 6px;
+    outline: 0;
+}
+
+QListWidget::item {
+    padding: 4px 4px;
+}
+
+QListWidget::item:selected {
+    background-color: #1a2436;
+    color: #ffffff;
 }

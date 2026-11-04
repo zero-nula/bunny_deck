@@ -227,6 +227,13 @@ def _refresh(p):
     p.drawLine(QPointF(15.5, 6), QPointF(16.2, 9.8))
 
 
+def _key(p):
+    p.drawEllipse(QPointF(8, 12), 4, 4)
+    p.drawLine(QPointF(12, 12), QPointF(20.5, 12))
+    p.drawLine(QPointF(17.5, 12), QPointF(17.5, 15.5))
+    p.drawLine(QPointF(20.5, 12), QPointF(20.5, 15))
+
+
 DRAW = {
     "plus": _plus, "terminal": _terminal, "saved": _saved, "ai": _ai, "radar": _radar,
     "broadcast": _broadcast, "split-v": _split_v, "split-h": _split_h, "folder": _folder,
@@ -234,6 +241,7 @@ DRAW = {
     "close": _close, "import": _import, "search": _search, "layouts": _layouts,
     "folder-plus": _folder_plus, "trash": _trash, "eye": _eye, "arrow-up": _arrow_up,
     "arrow-right": _arrow_right, "arrow-left": _arrow_left, "home": _home, "refresh": _refresh,
+    "key": _key,
 }
 
 

@@ -10,7 +10,7 @@ import os
 import signal
 
 from PyQt6.QtCore import QEvent, QObject, QPropertyAnimation, QSize, Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QAction, QFont, QKeyEvent, QKeySequence
+from PyQt6.QtGui import QAction, QFont, QFontDatabase, QKeyEvent, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QSizePolicy,
     QToolButton, QVBoxLayout, QWidget,
@@ -20,7 +20,8 @@ from . import background, colorschemes, icons, shortcuts, sshmux, theme
 from .config import Appearance
 from .native import QTermWidget
 
-FONT_FAMILY = "Monospace"
+FONT_FAMILY = "Monospace"  # when the desktop names no fixed-width font
+TEXT_MARGIN = 6  # pixels between the terminal's edge and the text
 FONT_SIZE = 10.5
 SCROLLBACK_LINES = 10000
 SSH_BINARY = "/usr/bin/ssh"
@@ -29,6 +30,17 @@ FALLBACK_SHELL = "/bin/bash"
 # True while keys typed in one terminal are being replayed into the others
 # (broadcast), so the replayed keys are not broadcast again.
 _forwarding = False
+
+
+def terminal_font(size):
+    """The desktop's fixed-width font (KDE: Hack, GNOME: its monospace font)
+    at the given size."""
+    family = QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()
+    font = QFont(family or FONT_FAMILY)
+    font.setStyleHint(QFont.StyleHint.TypeWriter)
+    font.setFixedPitch(True)
+    font.setPointSizeF(size)
+    return font
 
 
 def local_shell():
@@ -169,7 +181,8 @@ class TerminalPanel(QWidget):
         self.status_label.setObjectName("termStatus")
         # Only user@host gives way (down to nothing) when the panel is narrow;
         # name and status keep their natural width so they stay readable.
-        self.target_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.target_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
+        self.target_label.setMinimumWidth(1)
         for lbl in (self.name_label, self.status_label):
             lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
 
@@ -177,13 +190,23 @@ class TerminalPanel(QWidget):
         self.broadcast_box.setObjectName("broadcastBox")
         self.broadcast_box.setToolTip("Broadcast: what you type goes to every ticked terminal")
         self.broadcast_box.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # The header shows a hand for dragging; things you click get a pointer.
+        self.broadcast_box.setCursor(Qt.CursorShape.PointingHandCursor)
         self.broadcast_box.toggled.connect(self.set_broadcast)
         self.broadcast_box.hide()
         h.addWidget(self.broadcast_box)
         h.addWidget(self.status_dot)
         h.addWidget(self.name_label)
-        h.addWidget(self.target_label, 1)
+        h.addWidget(self.target_label)
+        # The empty space is where you grab the terminal to move it; the
+        # name, the tick box and the buttons are not.
+        h.addStretch(1)
         h.addWidget(self.status_label)
+        self._no_drag = (self.broadcast_box, self.status_dot, self.name_label,
+                         self.target_label, self.status_label)
+        for w in self._no_drag:
+            if w is not self.broadcast_box:
+                w.setCursor(Qt.CursorShape.ArrowCursor)
 
         def button(icon_name, text, tip, sig=None, name="hdrBtn"):
             b = QToolButton(header)
@@ -195,6 +218,7 @@ class TerminalPanel(QWidget):
             b.setObjectName(name)
             b.setAutoRaise(True)
             b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
             if sig is not None:
                 b.clicked.connect(lambda: sig.emit(self))
             h.addWidget(b)
@@ -232,10 +256,7 @@ class TerminalPanel(QWidget):
         term.setArgs(self.argv[1:])
         # $HOME for both kinds (ssh ignores it; a local shell starts there).
         term.setWorkingDirectory(os.path.expanduser("~"))
-        font = QFont(FONT_FAMILY)
-        font.setStyleHint(QFont.StyleHint.TypeWriter)
-        font.setPointSizeF(FONT_SIZE)
-        term.setTerminalFont(font)
+        term.setTerminalFont(terminal_font(FONT_SIZE))
         term.setHistorySize(SCROLLBACK_LINES)
         term.setScrollBarPosition(QTermWidget.ScrollBarPosition.ScrollBarRight)
         term.setBlinkingCursor(False)
@@ -243,7 +264,7 @@ class TerminalPanel(QWidget):
         term.setConfirmMultilinePaste(False)
         if hasattr(term, "autoHideMouseAfter"):  # not in older QTermWidget (e.g. 2.1)
             term.autoHideMouseAfter(2000)
-        term.setMargin(2)
+        term.setMargin(TEXT_MARGIN)
         term.setTerminalSizeHint(False)  # no "Size: 80 x 24" overlay while resizing
         # Keep the display (and the last output, e.g. why ssh ended) when the
         # session ends. With the default autoClose QTermWidget hides it, which
@@ -274,6 +295,27 @@ class TerminalPanel(QWidget):
         self.display.installEventFilter(self)
         return term
 
+    def _set_grabbed(self, on):
+        """Lights the terminal up while it is held by its header."""
+        if bool(self.property("grabbed")) == on:
+            return
+        self.setProperty("grabbed", on)
+        for w in (self, self.header, self.name_label):
+            w.style().unpolish(w)
+            w.style().polish(w)
+        if on:
+            if getattr(self, "_grab_tint", None) is None:
+                self._grab_tint = QWidget(self)
+                self._grab_tint.setObjectName("grabTint")
+                self._grab_tint.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                self._grab_tint.setAttribute(
+                    Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self._grab_tint.setGeometry(self.rect())
+            self._grab_tint.raise_()
+            self._grab_tint.show()
+        elif getattr(self, "_grab_tint", None) is not None:
+            self._grab_tint.hide()
+
     def eventFilter(self, obj, event):
         if obj is self.header and event.type() in (QEvent.Type.Enter, QEvent.Type.Leave):
             self._hovered = event.type() == QEvent.Type.Enter
@@ -292,7 +334,10 @@ class TerminalPanel(QWidget):
         t = event.type()
         gpos = event.globalPosition().toPoint()
         if t == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            if self.header.childAt(event.position().toPoint()) in self._no_drag:
+                return False
             self._drag_start = gpos
+            self._set_grabbed(True)
             return False
         if t == QEvent.Type.MouseMove and self._drag_start is not None:
             if not self._dragging:
@@ -308,6 +353,7 @@ class TerminalPanel(QWidget):
             was = self._dragging
             self._drag_start = None
             self._dragging = False
+            self._set_grabbed(False)
             if was:
                 self.header.setCursor(Qt.CursorShape.OpenHandCursor)
                 self.headerDragged.emit(self, gpos, "drop")
@@ -414,10 +460,7 @@ class TerminalPanel(QWidget):
         if size == self.font_size:
             return
         self.font_size = size
-        font = QFont(FONT_FAMILY)
-        font.setStyleHint(QFont.StyleHint.TypeWriter)
-        font.setPointSizeF(size)
-        self.terminal.setTerminalFont(font)
+        self.terminal.setTerminalFont(terminal_font(size))
 
     def paste(self):
         self.terminal.pasteClipboard()

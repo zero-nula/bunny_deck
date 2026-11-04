@@ -4,12 +4,12 @@ setup, terminal appearance, and the SSH credential prompt."""
 import os
 import shlex
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import (
     QCheckBox, QColorDialog, QComboBox, QDialog, QDialogButtonBox, QFileDialog, QFormLayout,
     QGridLayout, QHBoxLayout, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPushButton,
-    QSlider, QSpinBox, QVBoxLayout,
+    QSlider, QSpinBox, QToolButton, QVBoxLayout, QWidget,
 )
 
 from .config import (
@@ -147,6 +147,94 @@ class AddAIToolDialog(QDialog):
         super().accept()
 
 
+class ColorChooser(QWidget):
+    """Round colour swatches (the presets), a custom colour button and the
+    colour as #hex. Same interface as QColorDialog's colour part."""
+
+    currentColorChanged = pyqtSignal(QColor)
+
+    def __init__(self, color, parent=None):
+        super().__init__(parent)
+        self._color = QColor(color)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+        self.swatches = []
+        for c in SWATCHES:
+            b = QToolButton()
+            b.setObjectName("swatch")
+            b.setCheckable(True)
+            b.setFixedSize(30, 30)
+            b.setToolTip(c)
+            b.setStyleSheet(f"QToolButton#swatch {{ background-color: {c}; }}")
+            b.clicked.connect(lambda _=False, c=c: self.setCurrentColor(QColor(c)))
+            h.addWidget(b)
+            self.swatches.append((c, b))
+        self.custom = QToolButton()
+        self.custom.setObjectName("swatchCustom")
+        self.custom.setText("+")
+        self.custom.setFixedSize(30, 30)
+        self.custom.setToolTip("Another colour…")
+        self.custom.clicked.connect(self._pick)
+        h.addWidget(self.custom)
+        h.addSpacing(6)
+        self.hex = QLineEdit()
+        self.hex.setObjectName("hexField")
+        self.hex.setFixedWidth(86)
+        self.hex.setMaxLength(7)
+        self.hex.setToolTip("The colour as #rrggbb")
+        self.hex.editingFinished.connect(self._from_hex)
+        h.addWidget(self.hex)
+        h.addStretch(1)
+        self._sync()
+
+    def currentColor(self):
+        return QColor(self._color)
+
+    def setCurrentColor(self, color):
+        color = QColor(color)
+        if not color.isValid():
+            return
+        changed = color.name() != self._color.name()
+        self._color = color
+        self._sync()
+        if changed:
+            self.currentColorChanged.emit(QColor(color))
+
+    def _sync(self):
+        name = self._color.name().lower()
+        self.hex.setText(name)
+        custom = True
+        for c, b in self.swatches:
+            b.setChecked(c == name)
+            custom = custom and c != name
+        self.custom.setStyleSheet(
+            f"QToolButton#swatchCustom {{ background-color: {name}; color: #ffffff; }}"
+            if custom else "")
+
+    def _from_hex(self):
+        text = self.hex.text().strip()
+        if not text.startswith("#"):
+            text = "#" + text
+        color = QColor(text)
+        if color.isValid() and len(text) == 7:
+            self.setCurrentColor(color)
+        else:
+            self._sync()
+
+    def _pick(self):
+        color = QColorDialog.getColor(self._color, self, "Background colour",
+                                      QColorDialog.ColorDialogOption.DontUseNativeDialog)
+        if color.isValid():
+            self.setCurrentColor(color)
+
+
+def _section(text):
+    lbl = QLabel(text.upper())
+    lbl.setObjectName("sectionTitle")
+    return lbl
+
+
 class AppearanceDialog(QDialog):
     """Per-profile terminal background: colour, opacity and an optional
     image, previewed live."""
@@ -160,25 +248,11 @@ class AppearanceDialog(QDialog):
         self.original = appearance
         self.image = appearance.image
 
-        self.chooser = QColorDialog(QColor(appearance.background), self)
-        self.chooser.setOptions(QColorDialog.ColorDialogOption.NoButtons |
-                                QColorDialog.ColorDialogOption.DontUseNativeDialog)
-        self.chooser.setWindowFlags(Qt.WindowType.Widget)
+        self.setMinimumWidth(520)
+        self.chooser = ColorChooser(appearance.background, self)
         self.chooser.currentColorChanged.connect(self._changed)
 
-        swatches = QHBoxLayout()
-        swatches.addWidget(QLabel("Presets"))
-        for c in SWATCHES:
-            b = QPushButton()
-            b.setFixedSize(26, 20)
-            b.setToolTip(c)
-            b.setStyleSheet(f"background-color:{c}; border:1px solid #3a3f47;")
-            b.clicked.connect(lambda _=False, c=c: self.chooser.setCurrentColor(QColor(c)))
-            swatches.addWidget(b)
-        swatches.addStretch(1)
-
         row = QHBoxLayout()
-        row.addWidget(QLabel("Background opacity"))
         self.opacity = QSlider(Qt.Orientation.Horizontal)
         self.opacity.setRange(30, 100)
         self.opacity.setValue(round(appearance.opacity * 100))
@@ -188,7 +262,11 @@ class AppearanceDialog(QDialog):
         row.addWidget(self.opacity_label)
 
         image_row = QHBoxLayout()
-        image_row.addWidget(QLabel("Image"))
+        self.thumb = QLabel()
+        self.thumb.setObjectName("imageThumb")
+        self.thumb.setFixedSize(72, 46)
+        self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        image_row.addWidget(self.thumb)
         self.image_label = QLabel()
         self.image_label.setObjectName("dimLabel")
         image_row.addWidget(self.image_label, 1)
@@ -199,9 +277,12 @@ class AppearanceDialog(QDialog):
         self.image_mode.currentIndexChanged.connect(self._changed)
         image_row.addWidget(self.image_mode)
         choose = QPushButton("Choose…")
+        # Not a default button: Save stays the one Enter presses (and the blue one).
+        choose.setAutoDefault(False)
         choose.clicked.connect(self.choose_image)
         image_row.addWidget(choose)
         self.remove_image_btn = QPushButton("Remove")
+        self.remove_image_btn.setAutoDefault(False)
         self.remove_image_btn.clicked.connect(lambda: self.set_image(""))
         image_row.addWidget(self.remove_image_btn)
 
@@ -214,19 +295,34 @@ class AppearanceDialog(QDialog):
         buttons = QDialogButtonBox()
         reset = buttons.addButton("Reset to Default", QDialogButtonBox.ButtonRole.ResetRole)
         reset.clicked.connect(self.reset)
-        buttons.addButton(QDialogButtonBox.StandardButton.Cancel)
+        reset.setAutoDefault(False)
+        buttons.addButton(QDialogButtonBox.StandardButton.Cancel).setAutoDefault(False)
         ok = buttons.addButton("Save" if saveable else "Apply",
                                QDialogButtonBox.ButtonRole.AcceptRole)
         ok.setDefault(True)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
+        title = QLabel(f"Background of “{profile.name}”")
+        title.setObjectName("dialogTitle")
+        sub = _hint("Changes show in the terminal right away.")
+
         v = QVBoxLayout(self)
+        v.setContentsMargins(18, 16, 18, 14)
+        v.setSpacing(8)
+        v.addWidget(title)
+        v.addWidget(sub)
+        v.addSpacing(6)
+        v.addWidget(_section("Colour"))
         v.addWidget(self.chooser)
-        v.addLayout(swatches)
+        v.addSpacing(6)
+        v.addWidget(_section("Opacity"))
         v.addLayout(row)
+        v.addSpacing(6)
+        v.addWidget(_section("Image"))
         v.addLayout(image_row)
         v.addWidget(self.note)
+        v.addSpacing(8)
         v.addWidget(buttons)
         self._update_label()
 
@@ -252,7 +348,16 @@ class AppearanceDialog(QDialog):
 
     def _update_label(self):
         self.opacity_label.setText(f"{self.opacity.value()} %")
-        self.image_label.setText(os.path.basename(self.image) if self.image else "None")
+        self.image_label.setText(os.path.basename(self.image) if self.image else "No image")
+        pm = QPixmap(self.image) if self.image else QPixmap()
+        if pm.isNull():
+            self.thumb.setPixmap(QPixmap())
+            self.thumb.setText("—")
+        else:
+            self.thumb.setPixmap(pm.scaled(self.thumb.size(),
+                                           Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                                           Qt.TransformationMode.SmoothTransformation)
+                                 .copy(0, 0, self.thumb.width(), self.thumb.height()))
         self.image_label.setToolTip(self.image)
         self.image_mode.setEnabled(bool(self.image))
         self.remove_image_btn.setEnabled(bool(self.image))
@@ -553,28 +658,67 @@ class KeySetupDialog(QDialog):
             super().reject()
 
 
+def _keycaps(keys):
+    """A row of key caps for "Ctrl+Shift+T", "Ctrl+Tab / Ctrl+Shift+Tab", …"""
+    w = QWidget()
+    h = QHBoxLayout(w)
+    h.setContentsMargins(0, 0, 0, 0)
+    h.setSpacing(3)
+    alternatives = [k.strip() for part in keys.split(" / ") for k in part.split(", ")]
+    for i, combo in enumerate(alternatives):
+        if i:
+            sep = QLabel("or")
+            sep.setObjectName("dimLabel")
+            h.addSpacing(4)
+            h.addWidget(sep)
+            h.addSpacing(4)
+        parts = combo.split("+")
+        # "Ctrl++" splits into "Ctrl", "", "": the key is "+".
+        if combo.endswith("++"):
+            parts = combo[:-2].split("+") + ["+"]
+        for j, part in enumerate(p for p in parts if p):
+            if j:
+                plus = QLabel("+")
+                plus.setObjectName("dimLabel")
+                h.addWidget(plus)
+            cap = QLabel(part)
+            cap.setObjectName("keycap")
+            h.addWidget(cap)
+    h.addStretch(1)
+    return w
+
+
 class ShortcutsDialog(QDialog):
     """Overview of the keyboard shortcuts (shortcuts.OVERVIEW)."""
 
     def __init__(self, parent, overview):
         super().__init__(parent)
         self.setWindowTitle("Keyboard Shortcuts")
+        title = QLabel("Keyboard shortcuts")
+        title.setObjectName("dialogTitle")
         grid = QGridLayout()
-        grid.setHorizontalSpacing(18)
+        grid.setHorizontalSpacing(22)
+        grid.setVerticalSpacing(6)
         row = 0
         for group, entries in overview:
-            title = QLabel(f"<b>{group}</b>")
-            grid.addWidget(title, row, 0, 1, 2)
+            if row:
+                grid.setRowMinimumHeight(row, 10)
+                row += 1
+            grid.addWidget(_section(group), row, 0, 1, 2)
             row += 1
             for keys, text in entries:
-                k = QLabel(keys)
+                k = _keycaps(keys)
                 k.setObjectName("shortcutKeys")
+                k.setToolTip(keys)
                 grid.addWidget(k, row, 0)
                 grid.addWidget(QLabel(text), row, 1)
                 row += 1
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
         buttons.rejected.connect(self.reject)
         v = QVBoxLayout(self)
+        v.setContentsMargins(20, 16, 20, 14)
+        v.addWidget(title)
+        v.addSpacing(8)
         v.addLayout(grid)
+        v.addSpacing(8)
         v.addWidget(buttons)
-

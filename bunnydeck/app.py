@@ -273,26 +273,31 @@ class MainWindow(QMainWindow):
         self.refresh_connections()
         self.saved_menu.clear()
         profiles = sorted(self.config.profiles, key=lambda p: p.name.lower())
+        ssh_profiles = [p for p in profiles if not p.is_local]
+
+        def entry(menu, profile, slot):
+            # The text after the tab is shown right-aligned and dimmed.
+            a = menu.addAction(icons.dot(theme.accent_for(profile.appearance), 10),
+                               f"{profile.name}\t{profile.target}")
+            a.triggered.connect(lambda _=False, pid=profile.id: slot(pid))
+            return a
+
         if not profiles:
             self.saved_menu.addAction("No saved connections").setEnabled(False)
         for profile in profiles:
-            a = self.saved_menu.addAction(f"{profile.name}    {profile.target}")
-            a.triggered.connect(lambda _=False, pid=profile.id: self._on_saved_activate(pid))
+            entry(self.saved_menu, profile, self._on_saved_activate)
         self.saved_menu.addSeparator()
-        self.saved_menu.addAction("Import from ~/.ssh/config…").triggered.connect(
-            self.import_ssh_config)
-        keys = self.saved_menu.addMenu("Set up key login")
-        ssh_profiles = [p for p in self.config.profiles if not p.is_local]
+        self.saved_menu.addAction(icons.icon("import"), "Import from ~/.ssh/config…") \
+            .triggered.connect(self.import_ssh_config)
+        keys = self.saved_menu.addMenu(icons.icon("key"), "Set up key login")
         keys.setEnabled(bool(ssh_profiles))
-        for profile in sorted(ssh_profiles, key=lambda p: p.name.lower()):
-            a = keys.addAction(f"{profile.name}    {profile.target}")
-            a.triggered.connect(lambda _=False, pid=profile.id: self._on_key_setup(pid))
+        for profile in ssh_profiles:
+            entry(keys, profile, self._on_key_setup)
         # Removing is rare, so it lives at the end of this menu.
-        self.remove_menu = self.saved_menu.addMenu("Remove")
+        self.remove_menu = self.saved_menu.addMenu(icons.icon("trash"), "Remove")
         self.remove_menu.setEnabled(bool(profiles))
         for profile in profiles:
-            a = self.remove_menu.addAction(f"{profile.name}    {profile.target}")
-            a.triggered.connect(lambda _=False, pid=profile.id: self._on_saved_remove(pid))
+            entry(self.remove_menu, profile, self._on_saved_remove)
 
     def _on_key_setup(self, profile_id):
         profile = self.config.get(profile_id)

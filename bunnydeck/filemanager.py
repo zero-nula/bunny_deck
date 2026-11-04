@@ -102,7 +102,7 @@ def friendly_time(mtime, now=None):
 
 
 class PathBar(QStackedWidget):
-    """The folder as clickable parts (/ › home › lenny › projects); clicking
+    """The folder as clickable parts (/ › home › alice › projects); clicking
     the free space after them, or pressing Ctrl+L, edits it as text."""
 
     navigate = pyqtSignal(str)
@@ -342,6 +342,9 @@ class FilePane(QWidget):
 
         self.error_label = QLabel()
         self.error_label.setWordWrap(True)
+        # (Inside its card border; padding in the style sheet is not counted
+        # when a word-wrapped label measures its height.)
+        self.error_label.setContentsMargins(10, 8, 10, 8)
         self.error_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.error_label.hide()
         self._error_is_info = False
@@ -355,7 +358,11 @@ class FilePane(QWidget):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
         v.addWidget(header)
-        v.addWidget(self.error_label)
+        # The message (an error card or a dim note) with some air around it.
+        msg = QHBoxLayout()
+        msg.setContentsMargins(8, 8, 8, 0)
+        msg.addWidget(self.error_label)
+        v.addLayout(msg)
         v.addWidget(self.view, 1)
 
     # ----- sources --------------------------------------------------------
