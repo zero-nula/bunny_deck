@@ -106,6 +106,21 @@ class SplitLayout(QWidget):
         self._equalize_later(panel.parentWidget())
         return True
 
+    def replace_panel(self, old, new):
+        """Puts new exactly where old is (same splitter, index and size) and
+        takes old out of the layout."""
+        if old not in self.panels:
+            return False
+        splitter = old.parentWidget()
+        sizes = splitter.sizes()
+        idx = splitter.indexOf(old)
+        self.panels[self.panels.index(old)] = new
+        old.setParent(None)
+        splitter.insertWidget(idx, new)
+        new.show()
+        splitter.setSizes(sizes)
+        return True
+
     def swap_panels(self, a, b):
         """Exchanges the places of two terminals."""
         if a is b or a not in self.panels or b not in self.panels:

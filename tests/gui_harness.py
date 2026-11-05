@@ -23,6 +23,12 @@ from PyQt6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from bunnydeck.app import MainWindow, create_application, dispose_windows  # noqa: E402
 from bunnydeck.config import Config, Profile  # noqa: E402
+from bunnydeck import latency  # noqa: E402
+
+# SSH terminals ping their server for the header: in tests, a fake ping and
+# a fake `ssh -G` (no packets sent, ~/.ssh/config never read).
+latency.PING_BINARY = os.path.join(ROOT, "tests", "fake_ping.py")
+latency.SSH_BINARY = os.path.join(ROOT, "tests", "fake_ssh_g.py")
 
 RESULTS = []
 

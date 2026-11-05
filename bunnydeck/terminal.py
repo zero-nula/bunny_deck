@@ -7,7 +7,9 @@ QTermWidget handles resizing itself.
 """
 
 import os
+import re
 import signal
+import time
 
 from PyQt6.QtCore import QEvent, QObject, QPropertyAnimation, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QFontDatabase, QKeyEvent, QKeySequence
@@ -16,7 +18,7 @@ from PyQt6.QtWidgets import (
     QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import background, colorschemes, icons, shortcuts, sshmux, theme
+from . import background, colorschemes, icons, latency, shortcuts, sshmux, stats, theme
 from .config import Appearance
 from .native import QTermWidget
 
@@ -41,6 +43,48 @@ def terminal_font(size):
     font.setFixedPitch(True)
     font.setPointSizeF(size)
     return font
+
+
+# ----- who is logged in: root or not ------------------------------------------
+#
+# Read from what the shell shows: the prompt (the last, unfinished line of
+# output) and the window title most distributions set ("user@host: dir").
+# A root shell, also after `sudo -i` or `su -`, shows "root@host...#" or
+# "bash-5.2#". Prompts that show neither (some custom ones) are not judged.
+
+_ESCAPES = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b.")
+_ROOT_PROMPT = re.compile(r"(?:^|[\s\[(])root@[\w.-]+.*#\s?$|^[\w.-]*#\s?$")
+_USER_PROMPT = re.compile(r"[\w.-]+@[\w.-]+.*[$%>#]\s?$|^[\w.-]*[$%>]\s?$")
+
+
+def prompt_is_root(tail):
+    """True/False when the last line of output looks like a root/user
+    prompt, None when it does not look like a prompt."""
+    line = _ESCAPES.sub("", tail).replace("\r\n", "\n")
+    line = re.split(r"[\r\n]", line)[-1]
+    if len(line) > 200:
+        return None
+    if _ROOT_PROMPT.search(line):
+        return True
+    if _USER_PROMPT.search(line):
+        return False
+    return None
+
+
+def title_is_root(title):
+    m = re.match(r"\s*\[?([\w.-]+)@", title or "")
+    return None if m is None else m.group(1) == "root"
+
+
+def _process_uid(pid):
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("Uid:"):
+                    return int(line.split()[1])
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
 
 
 def local_shell():
@@ -100,6 +144,11 @@ class _TerminalKeys(QObject):
         if t == QEvent.Type.ShortcutOverride and self._action(event):
             event.accept()
             return True
+        if t == QEvent.Type.KeyPress and not self.panel.running \
+                and self.panel.child_pid is None and self.panel.ended \
+                and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.panel.reconnectRequested.emit(self.panel)
+            return True
         if t == QEvent.Type.KeyPress:
             action = self._action(event)
             if action is not None:
@@ -127,6 +176,9 @@ class TerminalPanel(QWidget):
     shortcutRequested = pyqtSignal(object, str)
     broadcastChanged = pyqtSignal(object)
     focused = pyqtSignal(object)
+    # The session ended and the user wants it again (button, Enter, menu).
+    reconnectRequested = pyqtSignal(object)
+    sessionEnded = pyqtSignal(object)
     # (panel, QMenu): the window fills the Move menu just before it opens.
     moveMenuRequested = pyqtSignal(object, object)
     # The Move button: the window shows the snap layouts for this panel.
@@ -142,9 +194,18 @@ class TerminalPanel(QWidget):
         self.session_id = TerminalPanel._counter
         self.profile = profile
         self.argv = argv or default_argv(profile)
+        self.argv_given = argv  # what a reconnect passes on
         self.child_pid = None
         self.running = False
+        self.ended = False  # the session ran and has ended (not: never started)
         self._bg_file = ""
+        # Root: known from the profile at first, then from the prompt/title.
+        self.is_root = False
+        self._root_evidence = profile.user == "root"
+        self._output_tail = ""
+        # Latency only for real SSH sessions (not when argv is given, as in tests).
+        self.measure_latency = argv is None and not profile.is_local
+        self._latency = None
         self.broadcast = False
         self.font_size = FONT_SIZE
         # Set by the window: the other terminals that receive what is typed
@@ -197,13 +258,38 @@ class TerminalPanel(QWidget):
         h.addWidget(self.broadcast_box)
         h.addWidget(self.status_dot)
         h.addWidget(self.name_label)
+        self.root_badge = QLabel("root")
+        self.root_badge.setObjectName("rootBadge")
+        self.root_badge.setToolTip("You are logged in as root here: every command has full "
+                                   "rights on this machine")
+        self.root_badge.setFixedHeight(15)
+        self.root_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.root_badge.hide()
+        h.addWidget(self.root_badge, 0, Qt.AlignmentFlag.AlignVCenter)
         h.addWidget(self.target_label)
         # The empty space is where you grab the terminal to move it; the
         # name, the tick box and the buttons are not.
         h.addStretch(1)
+        # The stats button: a chart icon with the ping beside it (SSH);
+        # click for the computer's live stats.
+        self.stats_btn = QToolButton(header)
+        self.stats_btn.setObjectName("statsBtn")
+        self.stats_btn.setIcon(icons.icon("stats"))
+        self.stats_btn.setIconSize(QSize(13, 13))
+        self.stats_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.stats_btn.setAutoRaise(True)
+        self.stats_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.stats_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.stats_btn.setToolTip("Stats: CPU, memory, disks and ping of this computer")
+        self.stats_btn.clicked.connect(self.show_stats)
+        self.stats_btn.hide()
+        self.stats_popup = None
+        self._stats_closed_at = 0.0
+        h.addWidget(self.stats_btn)
         h.addWidget(self.status_label)
         self._no_drag = (self.broadcast_box, self.status_dot, self.name_label,
-                         self.target_label, self.status_label)
+                         self.root_badge, self.target_label,
+                         self.status_label)
         for w in self._no_drag:
             if w is not self.broadcast_box:
                 w.setCursor(Qt.CursorShape.ArrowCursor)
@@ -232,6 +318,22 @@ class TerminalPanel(QWidget):
         self.move_menu.aboutToShow.connect(lambda: self.moveMenuRequested.emit(self, self.move_menu))
         self._drag_start = None
         self._dragging = False
+        # Shown when the session has ended: start it again in the same place.
+        self.reconnect_btn = QToolButton(header)
+        self.reconnect_btn.setObjectName("reconnectBtn")
+        self.reconnect_btn.setText("Restart" if self.profile.is_local else "Reconnect")
+        self.reconnect_btn.setIcon(icons.icon("refresh", color="#ffffff"))
+        self.reconnect_btn.setIconSize(QSize(12, 12))
+        self.reconnect_btn.setFixedHeight(18)
+        self.reconnect_btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.reconnect_btn.setToolTip(
+            ("Start the shell again" if self.profile.is_local else
+             f"Connect to {self.profile.target} again") + " (or press Enter in the terminal)")
+        self.reconnect_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.reconnect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.reconnect_btn.clicked.connect(lambda: self.reconnectRequested.emit(self))
+        self.reconnect_btn.hide()
+        h.addWidget(self.reconnect_btn, 0, Qt.AlignmentFlag.AlignVCenter)
         self.appearance_btn = button("image", "Background", "Background: colour, opacity and "
                                      "image of this terminal", self.appearanceRequested)
         # Move and background show while the mouse is over the header
@@ -274,6 +376,8 @@ class TerminalPanel(QWidget):
         # end of the session is detected from the process itself.
         term.finished.connect(self._on_finished)
         term.titleChanged.connect(self._check_alive)
+        term.titleChanged.connect(self._title_changed)
+        term.receivedData.connect(self._on_output)
         self._alive_timer = QTimer(self)
         self._alive_timer.setInterval(1000)
         self._alive_timer.timeout.connect(self._check_alive)
@@ -413,10 +517,103 @@ class TerminalPanel(QWidget):
         self.running = True
         self._set_status("connected", "ok")
         self._alive_timer.start()
+        self._update_root()
+        self.stats_btn.show()
+        if self.measure_latency:
+            self.start_latency()
 
     def _check_alive(self):
         if self.running and self.child_pid and not _process_alive(self.child_pid):
             self._on_finished()
+        elif self.running and self.profile.is_local:
+            self._update_root()
+
+    # ----- root and latency in the header ----------------------------------
+
+    def _on_output(self, text):
+        self._output_tail = (self._output_tail + text)[-400:]
+        root = prompt_is_root(self._output_tail)
+        if root is not None and root != self._root_evidence:
+            self._root_evidence = root
+            self._update_root()
+
+    def _title_changed(self):
+        root = title_is_root(self.terminal.title())
+        if root is not None and root != self._root_evidence:
+            self._root_evidence = root
+            self._update_root()
+
+    def _update_root(self):
+        root = self.running and self._root_evidence
+        if self.running and self.profile.is_local:
+            # A local terminal: the process in front (also `sudo -i`) says it.
+            uid = _process_uid(self.terminal.getForegroundProcessId())
+            if uid is not None:
+                root = uid == 0
+        if root != self.is_root:
+            self.is_root = root
+            self.root_badge.setVisible(root)
+
+    def start_latency(self):
+        if self._latency is None:
+            self._latency = latency.HostWatch(self.profile.ssh_args(), self)
+            self._latency.updated.connect(self._show_latency)
+
+    def _stop_latency(self):
+        if self._latency is not None:
+            self._latency.stop()
+            self._latency = None
+        self._show_latency(-1.0)
+
+    def _show_latency(self, ms):
+        """The ping beside the stats icon (-1: none, only the icon shows)."""
+        b = self.stats_btn
+        if ms < 0:
+            level, text = "", ""
+            b.setToolTip("Stats: CPU, memory and disks of this computer")
+        else:
+            level = "good" if ms < 60 else "fair" if ms < 150 else "slow"
+            text = f"{ms:.0f} ms" if ms >= 1 else "<1 ms"
+            b.setToolTip(f"Ping to the server: {ms:.1f} ms. Click for CPU, memory, "
+                         "disks and the ping graph.")
+        b.setText(text)
+        b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon if text
+                             else Qt.ToolButtonStyle.ToolButtonIconOnly)
+        if b.property("level") != level:
+            b.setProperty("level", level)
+            b.style().unpolish(b)
+            b.style().polish(b)
+        if self.stats_popup is not None:
+            self.stats_popup.update_ping()
+
+    @property
+    def latency_text(self):
+        return self.stats_btn.text()
+
+    def stats_argv(self):
+        """The stats script: over the shared SSH connection, or here for a
+        local terminal (and for test terminals that run a local shell)."""
+        if self.profile.is_local or not self.measure_latency:
+            return stats.local_argv()
+        return stats.ssh_argv(self.profile.ssh_args())
+
+    def show_stats(self):
+        if self.stats_popup is not None:
+            self.stats_popup.close()
+            return
+        # The click on this button that closed the popup must not reopen it.
+        if self._stats_closed_at and time.monotonic() - self._stats_closed_at < 0.3:
+            return
+        history = self._latency.history if self._latency is not None else None
+        title = "This computer" if self.profile.is_local else self.profile.name
+        popup = stats.StatsPopup(title, self.stats_argv(), history)
+        popup.closed.connect(self._stats_closed)
+        self.stats_popup = popup
+        popup.show_below(self.stats_btn)
+
+    def _stats_closed(self):
+        self.stats_popup = None
+        self._stats_closed_at = time.monotonic()
 
     def _on_finished(self):
         # QTermWidget does not report the exit code. The terminal keeps
@@ -427,9 +624,20 @@ class TerminalPanel(QWidget):
         self.running = False
         self.child_pid = None
         self._set_status("disconnected", "off")
+        self.ended = True
+        self.reconnect_btn.show()
+        self.sessionEnded.emit(self)
+        self._stop_latency()
+        self.stats_btn.hide()
+        if self.stats_popup is not None:
+            self.stats_popup.close()
+        self._update_root()
 
     def terminate(self):
         self._alive_timer.stop()
+        self._stop_latency()
+        if self.stats_popup is not None:
+            self.stats_popup.close()
         self._bg_timer.stop()
         self._remove_background_file()
         if self.child_pid:
@@ -520,6 +728,10 @@ class TerminalPanel(QWidget):
         files.setShortcut(QKeySequence("Ctrl+Shift+F"))
         files.triggered.connect(lambda: self.scpRequested.emit(self))
         menu.addAction(files)
+        if self.ended:
+            menu.addSeparator()
+            menu.addAction(self.reconnect_btn.icon(), self.reconnect_btn.text()).triggered \
+                .connect(lambda: self.reconnectRequested.emit(self))
         if not self.profile.is_local:
             menu.addSeparator()
             menu.addAction("Set up key login…").triggered.connect(

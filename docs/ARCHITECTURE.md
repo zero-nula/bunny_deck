@@ -47,6 +47,8 @@ bunnydeck/connections.py   SFTP connection pool (UI hooks passed in)
 bunnydeck/session.py       the open terminals and their arrangement, saved on quit
 bunnydeck/shortcuts.py     the keyboard shortcut table (terminal key filter, window, overview)
 bunnydeck/sshmux.py        one shared SSH connection per host (OpenSSH ControlMaster)
+bunnydeck/latency.py       ping to SSH hosts for the terminal header (one per address)
+bunnydeck/stats.py         the header's stats popup: CPU, memory, disks, processes, ping graph
 bunnydeck/sshconfig.py     reads hosts from ~/.ssh/config (ssh -G), appends Host entries
 bunnydeck/keysetup.py      key login setup: create key, authorize it, verify
 bunnydeck/transfer.py      Local/Remote backends and the copy engine
@@ -91,7 +93,7 @@ message asking to run `./build-native.sh` again.
 There is no web rendering. Each terminal is a `TerminalPanel`
 (`bunnydeck/terminal.py`): a header (QLabel/QToolButton) and a
 `QTermWidget`, which emulates a VT terminal and draws with Qt
-(`Konsole::TerminalDisplay`). Font: Monospace 10.5 pt, 10 000 lines of
+(`Konsole::TerminalDisplay`). Font: the desktop's fixed-width font at 10.5 pt, 10 000 lines of
 scrollback. Ctrl+Shift+C/V and Shift+Insert are caught by an event filter on
 the `TerminalDisplay`, together with all other shortcuts from
 `shortcuts.py`: Konsole claims every key (also as ShortcutOverride), so a
@@ -116,6 +118,55 @@ window-wide QShortcuts for when the focus is elsewhere (file manager).
   1 s timer that reads `/proc/<pid>/stat`. Closing sends `SIGHUP`.
   QTermWidget does not report the exit code, so the header shows
   "disconnected" for both a closed and a failed connection.
+
+### Reconnect
+
+A QTermWidget whose program has ended cannot start a new one, so a reconnect
+(the header's Reconnect/Restart button, Enter in an ended terminal, or the
+right-click menu) builds a new `TerminalPanel` for the same profile and argv
+with the old one's appearance, font size and broadcast tick, and
+`SplitLayout.replace_panel` puts it at the old one's index in the same
+splitter with the same sizes; the old panel is then discarded. Enter only
+reconnects in a terminal whose session ran and ended (`panel.ended`).
+The sidebar gets the number of ended terminals per connection
+(`sessionEnded` refreshes it) and paints the badge red; its Reconnect entry
+reconnects the ended terminals of that connection, or, if none has ended,
+asks and then replaces the running ones (`reconnect(force=True)`).
+
+### Root badge and latency
+
+The header shows a **root** badge while the session is logged in as root.
+SSH terminals cannot see the remote process, so it is read from what the
+shell shows: `receivedData` keeps the last few hundred characters of output,
+and when its last (unfinished) line looks like a prompt, `prompt_is_root`
+decides (`root@host…#`, `[root@host ~]#`, `bash-5.2#` → root;
+`user@host…$`, `bash-5.2$` → not). The window title most distributions set
+(`user@host: dir`) is used the same way. Other output and unusual prompts
+change nothing; before the first prompt, a profile with user `root` counts
+as root. A local terminal reads the user id of the foreground process from
+`/proc/<pid>/status` once a second instead.
+
+The **latency** (`latency.py`) is an ordinary ICMP `ping` every 5 s from this
+computer, never a command over the SSH connection (that would open a server
+session, and an auth-log line, every time) and never a probe of the SSH port
+(logged as an aborted login, which fail2ban may punish). The address comes
+from `ssh -G` with the profile's arguments, so aliases and `HostName` work;
+hosts behind `ProxyJump`/`ProxyCommand` are not pinged, because the ping
+would not take the connection's way. One `Monitor` per address is shared by
+all terminals to it and stops when the last one ends. No answer hides the
+value. It keeps the last 36 values for the graph in the stats popup.
+
+The **stats popup** (`stats.py`, the chart icon) runs one read-only POSIX
+`sh` script while it is open: once the host name, `PRETTY_NAME`, kernel and
+core count, then every 2 s `/proc/stat`, `/proc/meminfo`, `/proc/loadavg`,
+`/proc/uptime`, `df -P` and `ps --sort=-rss`, each block ending in `@@end`.
+For SSH it goes over the shared connection (`ssh` with `ControlPath`,
+`ControlMaster=no`, `BatchMode=yes`, `-T`), so it never asks for a password
+and costs one session (one auth-log line) per opening, not per refresh; for
+a local terminal it runs here. CPU usage is the difference between two
+`/proc/stat` samples. Disks are real devices plus `/` (ZFS on Proxmox),
+without tmpfs, loop devices and datasets. Closing the popup kills the
+command; the remote script ends at its next write.
 
 ### Session
 
@@ -400,4 +451,5 @@ suite on openSUSE Tumbleweed, Fedora, Arch Linux, Debian and Ubuntu.
 | Password / passphrase / host-key dialogs | ✓ real OpenSSH + throwaway local `sshd` | ✓ wrong → retry warning → right, cancel | Password auth on a real server |
 | Local↔Remote, Remote↔Remote copies, drag and drop | ✓ | ✓ (drops simulated at the widget level) | Real drag from a file manager |
 | Backgrounds: preview, save, persist, reset, images, per-pixel alpha | ✓ | ✓ | Desktop visibly showing through |
+| Root badge, ping latency, stats popup | ✓ prompt recognition, stats parsing | ✓ local shell with a root prompt, fake `ping` and `ssh -G`, the stats script run locally | Real servers, `sudo -i` |
 | Menu entry, icon, window association | `desktop-file-validate` | ✓ X11 `WM_CLASS`, `_KDE_NET_WM_DESKTOP_FILE` | Pinning to a task bar |

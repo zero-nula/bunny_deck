@@ -345,6 +345,27 @@ QSplitter::handle:hover {
     font-weight: bold;
 }
 
+/* Logged in as root: a red badge next to the name. */
+#termHeader QLabel#rootBadge {
+    color: #ffffff;
+    background-color: #c0392b;
+    border-radius: 3px;
+    padding: 0px 5px;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+/* The stats button: chart icon + ping, coloured by how fast it is. */
+#termHeader QToolButton#statsBtn {
+    font-family: monospace;
+    font-size: 10px;
+    padding: 1px 4px;
+}
+
+#termHeader QToolButton#statsBtn[level="good"] { color: #4fb37a; }
+#termHeader QToolButton#statsBtn[level="fair"] { color: #e0a43a; }
+#termHeader QToolButton#statsBtn[level="slow"] { color: #e5534b; }
+
 /* user@host: readable at a glance, a step below the name. */
 #termHeader QLabel#termTarget {
     color: #9aa3b0;
@@ -378,6 +399,20 @@ QSplitter::handle:hover {
 #termHeader QToolButton:hover {
     color: #c9ced6;
     background-color: #1f232a;
+}
+
+/* Reconnect: shown when a session has ended. */
+#termHeader QToolButton#reconnectBtn {
+    color: #ffffff;
+    background-color: #2f5fbf;
+    border-radius: 4px;
+    padding: 1px 8px 1px 6px;
+    font-weight: bold;
+}
+
+#termHeader QToolButton#reconnectBtn:hover {
+    color: #ffffff;
+    background-color: #3d70d6;
 }
 
 #termHeader QToolButton#hdrClose:hover {
@@ -842,4 +877,42 @@ QListWidget::item {
 QListWidget::item:selected {
     background-color: #1a2436;
     color: #ffffff;
+}
+
+/* Stats popup (chart icon in a terminal header) */
+#statsPopup {
+    background-color: #121418;
+    border: 1px solid #2c323c;
+    border-radius: 10px;
+}
+
+#statsHost {
+    color: #e6e9ef;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+#statsSection {
+    color: #6b7280;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
+#statsName {
+    color: #aab1bd;
+    min-width: 64px;
+}
+
+#statsValue {
+    color: #c9ced6;
+    font-family: monospace;
+    font-size: 11px;
+    min-width: 120px;
+}
+
+#statsProc {
+    color: #aab1bd;
+    font-family: monospace;
+    font-size: 11px;
 }

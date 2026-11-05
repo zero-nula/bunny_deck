@@ -234,6 +234,12 @@ def _key(p):
     p.drawLine(QPointF(20.5, 12), QPointF(20.5, 15))
 
 
+def _stats(p):  # a bar chart
+    p.drawLine(QPointF(4, 20), QPointF(20, 20))
+    for x, top in ((7, 13), (12, 8), (17, 4)):
+        p.drawLine(QPointF(x, 17), QPointF(x, top))
+
+
 DRAW = {
     "plus": _plus, "terminal": _terminal, "saved": _saved, "ai": _ai, "radar": _radar,
     "broadcast": _broadcast, "split-v": _split_v, "split-h": _split_h, "folder": _folder,
@@ -241,7 +247,7 @@ DRAW = {
     "close": _close, "import": _import, "search": _search, "layouts": _layouts,
     "folder-plus": _folder_plus, "trash": _trash, "eye": _eye, "arrow-up": _arrow_up,
     "arrow-right": _arrow_right, "arrow-left": _arrow_left, "home": _home, "refresh": _refresh,
-    "key": _key,
+    "key": _key, "stats": _stats,
 }
 
 

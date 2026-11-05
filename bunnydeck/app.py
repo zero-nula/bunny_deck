@@ -28,7 +28,7 @@ from .layout import (
     ABOVE, BELOW, HORIZONTAL_SPLIT, LEFT, RIGHT, SWAP, VERTICAL_SPLIT, SplitLayout,
 )
 from .sidebar import LOCAL_ID, ConnectionSidebar
-from .terminal import TerminalPanel, local_shell
+from .terminal import TerminalPanel, local_shell, terminal_font
 from .welcome import WelcomeScreen
 
 APP_ID = "org.bunnydeck.BunnyDeck"
@@ -80,6 +80,7 @@ class MainWindow(QMainWindow):
 
         self.sidebar = ConnectionSidebar()
         self.sidebar.openRequested.connect(self._on_sidebar_open)
+        self.sidebar.reconnectRequested.connect(self._on_sidebar_reconnect)
         self.sidebar.keySetupRequested.connect(self._on_key_setup)
         self.sidebar.removeRequested.connect(self._on_saved_remove)
         self.sidebar.addRequested.connect(lambda: self.add_ssh())
@@ -105,14 +106,18 @@ class MainWindow(QMainWindow):
         connections have terminals open, recent ones)."""
         if self.sidebar is None or self.empty is None:
             return
-        counts = {}
+        counts, ended = {}, {}
         local_open = 0
         for p in self.layout_.panels:
+            key = LOCAL_ID if p.profile is self.local_profile else p.profile.id
             if p.profile is self.local_profile:
                 local_open += 1
             counts[p.profile.id] = counts.get(p.profile.id, 0) + 1
+            if p.ended and not p.running:
+                ended[key] = ended.get(key, 0) + 1
         self.sidebar.set_connections(self.config.profiles, counts,
-                                     theme.accent_for(self.local_profile.appearance), local_open)
+                                     theme.accent_for(self.local_profile.appearance), local_open,
+                                     ended)
         self.empty.set_recent(self.config.recent_profiles())
 
     def _on_sidebar_open(self, profile_id):
@@ -120,6 +125,34 @@ class MainWindow(QMainWindow):
             self.open_local()
         else:
             self._on_saved_activate(profile_id)
+
+    def _on_sidebar_reconnect(self, profile_id):
+        """Reconnects the connection's disconnected terminals; if none has
+        disconnected (e.g. a frozen session), ends and reopens the running
+        ones after asking."""
+        panels = [p for p in self.layout_.ordered_panels()
+                  if (p.profile is self.local_profile if profile_id == LOCAL_ID
+                      else p.profile.id == profile_id)]
+        ended = [p for p in panels if p.ended and not p.running]
+        if ended:
+            for p in ended:
+                self.reconnect(p)
+            return
+        if not panels:
+            return
+        name = panels[0].profile.name
+        n = len(panels)
+        what = "shell" if profile_id == LOCAL_ID else "session"
+        if not self._confirm(
+            f"Reconnect “{name}”?",
+            (f"The running {what} will be ended" if n == 1 else
+             f"The {n} running {what}s will be ended")
+            + " and a new one opened in its place.",
+            "Reconnect",
+        ):
+            return
+        for p in panels:
+            self.reconnect(p, force=True)
 
     def set_sidebar_visible(self, visible, save=True):
         self.sidebar.setVisible(visible)
@@ -470,8 +503,9 @@ class MainWindow(QMainWindow):
         argv = [shell, "-ic", f"{tool.command}; exec {shlex.quote(shell)}"]
         return self.open_profile(profile, argv=argv)
 
-    def open_profile(self, profile, argv=None):
-        panel = TerminalPanel(profile, argv=argv)
+    def _new_panel(self, profile, argv=None, appearance=None):
+        """A terminal wired to the window, not yet placed or started."""
+        panel = TerminalPanel(profile, argv=argv, appearance=appearance)
         panel.closeRequested.connect(self._on_close_requested)
         panel.appearanceRequested.connect(self._on_appearance_requested)
         panel.keySetupRequested.connect(lambda p: self.setup_key_login(p.profile))
@@ -486,6 +520,12 @@ class MainWindow(QMainWindow):
         panel.moveMenuRequested.connect(self._fill_move_menu)
         panel.snapRequested.connect(lambda p: self.show_snap(p, p.move_btn))
         panel.headerDragged.connect(self._on_header_drag)
+        panel.reconnectRequested.connect(self.reconnect)
+        panel.sessionEnded.connect(lambda _p: self.refresh_connections())
+        return panel
+
+    def open_profile(self, profile, argv=None):
+        panel = self._new_panel(profile, argv)
         # In a custom arrangement, open next to the active terminal instead of
         # flattening the layout; with a preset, keep the uniform row/column.
         near = self.active_panel if self.layout_.custom else None
@@ -626,6 +666,34 @@ class MainWindow(QMainWindow):
         if self.file_manager is not None:
             self.file_manager.sessions_changed()
         self._update_view()
+
+    def reconnect(self, old, force=False):
+        """Starts an ended session again: a new terminal in the old one's
+        place, with its background, font size and broadcast tick. force: also
+        a running one (it is ended first)."""
+        if (old.running and not force) or old not in self.layout_.panels:
+            return None
+        panel = self._new_panel(old.profile, old.argv_given, old.appearance)
+        if self.broadcasting:
+            panel.set_broadcast_mode(True, include=old.broadcast)
+        if old.font_size != panel.font_size:
+            panel.font_size = old.font_size
+            panel.terminal.setTerminalFont(terminal_font(old.font_size))
+        was_active = self.active_panel is old
+        old.set_broadcast(False)
+        old.terminate()
+        self.layout_.replace_panel(old, panel)
+        old.deleteLater()
+        if was_active:
+            self.active_panel = None
+        if self.config.get(old.profile.id) is not None:
+            self.config.mark_used(old.profile.id)
+        self.refresh_connections()
+        if self.file_manager is not None:
+            self.file_manager.sessions_changed()
+        panel.spawn()
+        panel.focus_terminal()
+        return panel
 
     def _on_close_requested(self, panel):
         what = ("The shell in this terminal" if panel.profile.is_local

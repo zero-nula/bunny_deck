@@ -16,11 +16,14 @@ ROLE_ID = Qt.ItemDataRole.UserRole
 ROLE_TARGET = Qt.ItemDataRole.UserRole + 1
 ROLE_COLOR = Qt.ItemDataRole.UserRole + 2
 ROLE_OPEN = Qt.ItemDataRole.UserRole + 3
+ROLE_ENDED = Qt.ItemDataRole.UserRole + 4  # open terminals whose session ended
+
+ENDED = "#e5534b"
 
 
 class _ConnectionDelegate(QStyledItemDelegate):
-    """Paints a row: colour dot, name, user@host, and a green badge with the
-    number of open terminals."""
+    """Paints a row: colour dot, name, user@host, and a badge with the number
+    of open terminals: green, red when one of them has disconnected."""
 
     HEIGHT = 42
 
@@ -53,10 +56,13 @@ class _ConnectionDelegate(QStyledItemDelegate):
             text = str(n_open)
             w = max(18, p.fontMetrics().horizontalAdvance(text) + 10)
             badge = QRectF(right - w, r.center().y() - 8, w, 16)
-            p.setBrush(QColor(108, 192, 112, 45))
-            p.setPen(QPen(QColor(theme.OK), 1))
+            colour = QColor(ENDED if index.data(ROLE_ENDED) else theme.OK)
+            fill = QColor(colour)
+            fill.setAlpha(45)
+            p.setBrush(fill)
+            p.setPen(QPen(colour, 1))
             p.drawRoundedRect(badge, 8, 8)
-            p.setPen(QColor(theme.OK))
+            p.setPen(colour)
             p.drawText(badge, Qt.AlignmentFlag.AlignCenter, text)
             right = badge.left() - 6
 
@@ -88,6 +94,7 @@ class ConnectionSidebar(QWidget):
     importRequested() ask the main window to do the rest."""
 
     openRequested = pyqtSignal(str)
+    reconnectRequested = pyqtSignal(str)
     keySetupRequested = pyqtSignal(str)
     removeRequested = pyqtSignal(str)
     addRequested = pyqtSignal()
@@ -161,8 +168,11 @@ class ConnectionSidebar(QWidget):
         v.addWidget(self.no_match)
         self.no_match.hide()
 
-    def set_connections(self, profiles, open_counts, local_color, local_open):
-        """profiles: saved Profiles; open_counts: {profile id: open terminals}."""
+    def set_connections(self, profiles, open_counts, local_color, local_open,
+                        ended_counts=None):
+        """profiles: saved Profiles; open_counts: {profile id: open terminals};
+        ended_counts: {profile id (LOCAL_ID too): of those, disconnected}."""
+        ended_counts = ended_counts or {}
         current = self.list.currentItem().data(ROLE_ID) if self.list.currentItem() else None
         self.list.clear()
         rows = [(LOCAL_ID, "Local terminal", "this computer", local_color, local_open)]
@@ -175,7 +185,11 @@ class ConnectionSidebar(QWidget):
             item.setData(ROLE_TARGET, target)
             item.setData(ROLE_COLOR, color)
             item.setData(ROLE_OPEN, n)
-            item.setToolTip(f"{name} — {target}" + (f"\n{n} open" if n else ""))
+            ended = ended_counts.get(pid, 0)
+            item.setData(ROLE_ENDED, ended)
+            item.setToolTip(f"{name} — {target}" + (f"\n{n} open" if n else "")
+                            + (f", {ended} disconnected (right-click → Reconnect)"
+                               if ended else ""))
             self.list.addItem(item)
             if pid == current:
                 self.list.setCurrentItem(item)
@@ -217,6 +231,12 @@ class ConnectionSidebar(QWidget):
         pid = item.data(ROLE_ID)
         menu = QMenu(self)
         menu.addAction("Open terminal").triggered.connect(lambda: self.openRequested.emit(pid))
+        if item.data(ROLE_OPEN):
+            local = pid == LOCAL_ID
+            text = ("Restart" if local else "Reconnect") if item.data(ROLE_ENDED) else \
+                ("Restart shell…" if local else "Reconnect…")
+            menu.addAction(icons.icon("refresh"), text).triggered.connect(
+                lambda: self.reconnectRequested.emit(pid))
         if pid != LOCAL_ID:
             menu.addAction("Set up key login…").triggered.connect(
                 lambda: self.keySetupRequested.emit(pid))
