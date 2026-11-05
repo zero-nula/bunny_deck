@@ -28,6 +28,7 @@ bunnydeck/app.py           QApplication setup, main window, toolbar, AI menu, si
 bunnydeck/layout.py        nested QSplitters, Move and split presets
 bunnydeck/snap.py          snap layout templates, zone assignment and the popup
 bunnydeck/sidebar.py       connections sidebar (search, colour dots, open terminal counts)
+bunnydeck/aimenu.py        the AI menu's rows (QWidgetActions: initial tile, command, open count)
 bunnydeck/welcome.py       start screen: main actions and recent connections
 bunnydeck/theme.py         shared colours; a connection's accent colour from its background
 bunnydeck/icons.py         toolbar and header icons drawn with QPainter

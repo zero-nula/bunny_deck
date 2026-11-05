@@ -35,11 +35,18 @@ def menu_labels(menu):
     return [a.text() for a in menu.actions() if a.text()]
 
 
+def action(menu, text):
+    return [a for a in menu.actions() if a.text() == text][0]
+
+
+from PyQt6.QtWidgets import QLabel  # noqa: E402
+
+
 def test(app):
     win = app.window
     check(win.ai_button.accessibleName() == "AI assistants" and win.ai_button.menu(),
           "toolbar has an AI menu")
-    check(menu_labels(win.ai_menu) == ["No AI tools added", "Add…", "Remove"],
+    check(menu_labels(win.ai_menu) == ["No AI tools added", "Add AI tool…", "Remove"],
           f"installed tools are not listed until added ({menu_labels(win.ai_menu)})")
 
     # Add through the dialog: the name defaults from the command.
@@ -57,11 +64,11 @@ def test(app):
     dlg.accept()
     win.config.add_ai_tool(dlg.tool)
     win.rebuild_ai_menu()
-    check(menu_labels(win.ai_menu) == ["Claude", "OpenCode", "Add…", "Remove"],
+    check(menu_labels(win.ai_menu) == ["Claude", "OpenCode", "Add AI tool…", "Remove"],
           f"added tools are listed ({menu_labels(win.ai_menu)})")
     check([t.name for t in Config().ai_tools] == ["Claude", "OpenCode"], "tools are saved")
 
-    win.ai_menu.actions()[0].trigger()
+    action(win.ai_menu, "Claude").trigger()
     yield lambda: win.layout_.panels and win.layout_.panels[0].child_pid
     p = win.layout_.panels[0]
     check(p.profile.is_local and p.profile.name == "Claude", "panel is a local 'Claude' terminal")
@@ -73,10 +80,15 @@ def test(app):
     yield lambda: "AFTER-42" in term_text(p)
     check("AFTER-42" in term_text(p) and p.running, "shell continues after the tool exits")
 
-    win.ai_menu.actions()[1].trigger()
+    action(win.ai_menu, "OpenCode").trigger()
     p2 = win.layout_.panels[-1]
     yield lambda: "FAKE-OPENCODE" in term_text(p2)
     check("FAKE-OPENCODE" in term_text(p2), "command found via ~/.bashrc's PATH")
+
+    win.rebuild_ai_menu()
+    row = action(win.ai_menu, "Claude").defaultWidget()
+    badges = [w.text() for w in row.findChildren(QLabel) if w.objectName() == "aiOpen"]
+    check(badges == ["1 open"], f"the menu shows how many are open ({badges})")
 
     claude = win.config.ai_tools[0]
     check(win.open_ai(claude).profile is p.profile, "terminals of one tool share a profile")
@@ -85,7 +97,7 @@ def test(app):
     win._confirm = lambda *a: True
     remove_menu = [a for a in win.ai_menu.actions() if a.text() == "Remove"][0].menu()
     remove_menu.actions()[0].trigger()
-    check(menu_labels(win.ai_menu) == ["OpenCode", "Add…", "Remove"],
+    check(menu_labels(win.ai_menu) == ["OpenCode", "Add AI tool…", "Remove"],
           f"removed tool is gone from the menu ({menu_labels(win.ai_menu)})")
     check([t.name for t in Config().ai_tools] == ["OpenCode"], "removal is saved")
     check(p.running, "open terminal of a removed tool keeps running")

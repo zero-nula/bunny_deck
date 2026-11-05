@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import colorschemes, icons, keysetup, snap, theme, mainthread, session, shortcuts, sshconfig, sshmux
+from . import aimenu, colorschemes, icons, keysetup, snap, theme, mainthread, session, shortcuts, sshconfig, sshmux
 from .config import (
     KIND_LOCAL, Config, Profile, store_background, validate_host, validate_user,
 )
@@ -236,6 +236,8 @@ class MainWindow(QMainWindow):
         self.ai_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.ai_menu = QMenu(self.ai_button)
         self.ai_button.setMenu(self.ai_menu)
+        # Rebuilt each time it opens, so the "open" counts are current.
+        self.ai_menu.aboutToShow.connect(self.rebuild_ai_menu)
         self.rebuild_ai_menu()
         h.addWidget(self.ai_button)
 
@@ -454,22 +456,13 @@ class MainWindow(QMainWindow):
     # ----- AI assistants --------------------------------------------------
 
     def rebuild_ai_menu(self):
-        self.ai_menu.clear()
         tools = sorted(self.config.ai_tools, key=lambda t: t.name.lower())
-        if not tools:
-            self.ai_menu.addAction("No AI tools added").setEnabled(False)
-        for tool in tools:
-            a = self.ai_menu.addAction(tool.name)
-            a.setToolTip(tool.command)
-            a.triggered.connect(lambda _=False, t=tool: self.open_ai(t))
+        counts = {}
+        for tool_id, profile in self.ai_profiles.items():
+            counts[tool_id] = sum(1 for p in self.layout_.panels if p.profile is profile)
+        aimenu.fill(self.ai_menu, tools, counts, self.open_ai, self.add_ai_tool,
+                    self._on_ai_remove)
         self.ai_menu.setToolTipsVisible(True)
-        self.ai_menu.addSeparator()
-        self.ai_menu.addAction("Add…").triggered.connect(self.add_ai_tool)
-        remove = self.ai_menu.addMenu("Remove")
-        remove.setEnabled(bool(tools))
-        for tool in tools:
-            a = remove.addAction(tool.name)
-            a.triggered.connect(lambda _=False, tid=tool.id: self._on_ai_remove(tid))
 
     def add_ai_tool(self):
         dlg = AddAIToolDialog(self)

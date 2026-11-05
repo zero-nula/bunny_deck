@@ -128,7 +128,7 @@ The other toolbar buttons are icons; hover over one to see its name and shortcut
     4. optionally adds a `Host` entry to `~/.ssh/config` (after a backup copy), so `ssh <name>` works in any terminal.
 
     It never changes the server's SSH settings: password logins stay allowed until you turn them off yourself.
-- **Sparkles icon (AI)**: your own list of AI assistants. **Add…** asks for the command (for example `claude` or `opencode --continue`) and a name; **Remove** takes one off the list.
+- **Sparkles icon (AI)**: your own list of AI assistants. Each one shows with a coloured initial, its command and how many of its terminals are open. **Add AI tool…** asks for the command (for example `claude` or `opencode --continue`) and a name; **Remove** takes one off the list.
   Choosing one runs its command in a new local terminal, in your shell with `~/.bashrc` loaded; when it exits, the shell stays open.
 - **Broadcast icon** (or Ctrl+Shift+B): each terminal gets a tick box; tick the ones that should take part. What you type in a ticked terminal — keys, Enter, Ctrl+C, pastes — goes to every ticked terminal.
   Nothing is ticked when you turn it on. Ticked terminals have an orange frame, and the button turns orange and shows how many there are.
