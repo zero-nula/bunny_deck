@@ -190,6 +190,23 @@ the number of running containers.
   **Logs** (`docker logs -f`) or **Copy name**, or a project for its **Logs**
   (`docker compose logs -f`). Logs open as ordinary terminals: scroll, search
   and copy as usual, and close them when you are done.
+- **Compose files**: double-click a project, or right-click a project or one
+  of its containers, for **View compose**. It opens a read-only view of the
+  project's compose files below the panel, one tab per file
+  (`compose.override.yml` too), with line numbers and colours. **Refresh**
+  reads them again. **Edit compose** opens them in **your editor on this
+  computer** (the one Files uses, see *Which editor*). Each file opens on its
+  own, and every save is uploaded to the server, exactly as with Files. After
+  a save the compose view refreshes, and a message offers **Apply (up -d)**;
+  nothing is applied unless you click it and confirm. **Edit With ▸** picks
+  another editor once, or a custom command. A file your user may not write
+  (for example one owned by root) is named, with **Edit in Terminal** offered
+  instead. **Edit in terminal ($EDITOR)** opens the files in the server's
+  editor (`$EDITOR`, else `nano`) in a terminal. **Apply (up -d)** first shows
+  the command, then runs `docker compose up -d` with those files in the
+  project's folder, in a terminal. The compose view has an **Edit** button
+  for the file it shows, and a right-click menu with the same choices. Containers that were not started by docker compose
+  have these greyed out.
 - **Permission denied**: if your user may not use Docker, the whale turns grey
   and the panel explains how to fix it. Add the user to the `docker` group
   (`sudo usermod -aG docker $USER`), then log in again.

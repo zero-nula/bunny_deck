@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """A stand-in for docker in the tests (never talks to a daemon).
 FAKE_DOCKER_MODE: "ok" (default), "denied" or "daemon" (how `info` and `ps`
-fail). exec, logs and compose logs print a marker line and the arguments."""
+fail). exec, logs and compose logs print a marker line and the arguments.
+FAKE_DOCKER_PS_FILE: `ps` prints that file's lines instead of the sample."""
 
 import os
 import sys
@@ -25,7 +26,12 @@ if cmd in ("info", "ps") and mode in ERRORS:
 if cmd == "info":
     print(os.environ.get("FAKE_DOCKER_RUNNING", str(RUNNING)))
 elif cmd == "ps":
-    print("\n".join(PS_LINES))
+    ps_file = os.environ.get("FAKE_DOCKER_PS_FILE")
+    if ps_file:
+        with open(ps_file) as f:
+            print(f.read().rstrip("\n"))
+    else:
+        print("\n".join(PS_LINES))
 elif cmd == "exec":
     print("FAKE-DOCKER-EXEC " + " ".join(args[1:]))
 elif cmd == "logs":

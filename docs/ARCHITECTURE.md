@@ -40,6 +40,9 @@ bunnydeck/firewall.py      ufw: input checks, commands, server info, reading `uf
 bunnydeck/firewalldialog.py  the firewall window of a server
 bunnydeck/docker.py        Docker on SSH servers: the check, docker ps parsing, shell/logs commands
 bunnydeck/dockerpanel.py   the Docker panel: containers by compose project, in the layout
+bunnydeck/composeview.py   read-only compose files of a project (tabs, line numbers, YAML colours)
+bunnydeck/editing.py       local editing for the whole window: SFTP pool, remote edits, editor menus
+bunnydeck/toast.py         short messages at the bottom right, optionally with a button
 bunnydeck/colorschemes.py  per-profile colours as generated QTermWidget colour schemes
 bunnydeck/background.py    background images composed to the terminal's size
 bunnydeck/dialogs.py       Add SSH, Add AI tool, Background and credential dialogs
@@ -444,6 +447,44 @@ the session; the Docker panel of a saved connection is
 (`{"kind": "docker", "profile": id}`) and is restored in place without
 opening a terminal of its own.
 
+**Compose files.** A project's folder and files come from its containers'
+labels: `com.docker.compose.project.working_dir` and
+`com.docker.compose.project.config_files` (`split_config_files`). compose
+joins several files with commas, so a path that itself contains a comma
+cannot be told apart. `project_info` collects them per project for the
+panel. A container without these labels is not from compose: its compose
+actions are greyed, with the reason in the tooltip.
+
+- **View compose** opens a `ComposeViewPanel` (a `BasePanel`, not saved in
+  the session) below the Docker panel. It reads the files with
+  `compose_read_script` over the shared connection (`remote.RemoteScript`):
+  one `@@<nonce> ok|missing|unreadable` line per file, then the file, at
+  most 1 MB. The nonce is random per read, so a line in a file cannot pass
+  for a marker. `parse_compose_read` splits the result. Each file gets a tab
+  with a `CodeView` (read-only, line numbers in a gutter) and a
+  `YamlHighlighter`. A missing or unreadable file shows a message in its tab;
+  no connection shows one for the panel.
+- **Edit compose** opens the files in the local editor through the
+  window's `Editing` service (`editing.py`). That is the same mechanism as
+  double-clicking a file in Files: `RemoteEdits` downloads, watches, uploads
+  safely, asks on conflicts and keeps unsaved copies on quit. First
+  `compose_access_script` checks over the shared connection that each file
+  can be read and written, and that its folder can be written (the safe
+  upload renames a temporary file into place). This also means SFTP is only
+  used while the master is up, so there is no new login. Files that fail
+  the check are named (`ACCESS_PROBLEMS`), with **Edit in Terminal** offered.
+  `RemoteEdits.saved` tells the window when a compose file was uploaded
+  (matched by `EditSession.requested`). The window then refreshes the
+  project's compose view and shows a toast whose **Apply (up -d)** button
+  goes through the usual confirmation.
+- **Edit in terminal** is a terminal running
+  `cd <dir> && exec ${EDITOR:-nano} <files>`. `$EDITOR` is the user's own
+  setting on that server and is left unquoted so it may carry options;
+  everything else is quoted.
+- **Apply** asks first, showing the command, then runs
+  `cd <dir> && docker compose -p <project> -f <file>… up -d` in a terminal,
+  with the same files the project was started with.
+
 `MainWindow.open_docker(profile)` is the one way in. It is used by the
 sidebar and terminal menus now, and by a header button or a sidebar section
 later.
@@ -498,6 +539,15 @@ cut off SSH; it explains how instead. `open_firewall(profile, port)` also
 fills in the port, for a later "Allow in firewall…" on a container's port.
 
 ## File manager and SFTP
+
+The SFTP connections (`ConnectionPool`), remote edits (`RemoteEdits`),
+starting the editor and the editor menus (Default Editor, Edit With ▸)
+belong to the window's `Editing` service (`editing.py`), not to the file
+manager. So the Docker panel can open compose files without opening Files,
+and both share one SFTP connection per server. The file manager keeps thin
+methods (`edit_file`, `launch`, `set_default_editor`, …) that call it.
+Editing messages go to the file manager's status bar while it is shown,
+else to a toast.
 
 - The file manager opens one SFTP channel per profile (over the shared
   connection when a terminal has one): `ssh <options> -s host sftp`, started with `subprocess.Popen` over pipes
@@ -609,6 +659,6 @@ suite on openSUSE Tumbleweed, Fedora, Arch Linux, Debian and Ubuntu.
 | Backgrounds: preview, save, persist, reset, images, per-pixel alpha | ✓ | ✓ | Desktop visibly showing through |
 | Detach / attach | | ✓ same PID and widget, scrollback, font, colours, columns × lines, shortcuts, way back, X, session, quit | Detached window on a second screen under KDE Wayland |
 | Firewall: info, allow, rules, delete | ✓ ports, addresses, comments, command injection attempts, `ufw status numbered`, markers | ✓ fake `ssh`, `sudo` and `ufw` (rules in a temp file), (y|n) answered in the terminal | A real ufw, a real sudo password |
-| Docker: check, panel, shells and logs | ✓ `docker ps` JSON, labels, ports, groups, errors, quoting | ✓ fake `ssh` that runs commands here and fake `docker` | A real Docker server, `docker exec` into real containers |
+| Docker: check, panel, shells and logs, compose files | ✓ `docker ps` JSON, labels (several compose files, spaces), ports, groups, errors, quoting and injection attempts, reading files (missing, unreadable, fake markers) | ✓ fake `ssh` that runs commands here and fake `docker` | A real Docker server, `docker exec` into real containers |
 | Root badge, ping latency, stats popup | ✓ prompt recognition, stats parsing | ✓ local shell with a root prompt, fake `ping` and `ssh -G`, the stats script run locally | Real servers, `sudo -i` |
 | Menu entry, icon, window association | `desktop-file-validate` | ✓ X11 `WM_CLASS`, `_KDE_NET_WM_DESKTOP_FILE` | Pinning to a task bar |

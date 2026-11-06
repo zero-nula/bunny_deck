@@ -9,8 +9,8 @@ import os
 import threading
 import time
 
-from PyQt6.QtCore import QEvent, QMimeData, QMimeDatabase, QProcess, QSize, Qt, QUrl, pyqtSignal
-from PyQt6.QtGui import QActionGroup, QColor, QDesktopServices, QIcon
+from PyQt6.QtCore import QEvent, QMimeData, QMimeDatabase, QSize, Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QDesktopServices, QIcon
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QFrame, QHBoxLayout, QHeaderView,
     QInputDialog, QLabel, QLineEdit, QMenu, QMessageBox, QProgressBar, QPushButton,
@@ -18,10 +18,8 @@ from PyQt6.QtWidgets import (
 )
 
 from . import editors, icons, sftp, theme
-from .connections import ConnectionPool, run_on_main_sync
-from .dialogs import CredentialDialog
+from .connections import run_on_main_sync
 from .mainthread import call_soon
-from .remoteedit import RemoteEdits
 from .transfer import (
     LocalBackend, RemoteBackend, TransferError, copy_file, count_tree, delete_path, inside,
     plan_folder, protected, same_place,
@@ -615,8 +613,11 @@ class FileManager(QWidget):
     def __init__(self, window):
         super().__init__()
         self.window = window
-        self.pool = ConnectionPool(call_soon, self._ask_credentials)
-        self.edits = RemoteEdits(self.pool, self)
+        # The SFTP connections and the remote edits belong to the window,
+        # shared with the Docker panel's compose files (editing.py).
+        self.editing = window.editing
+        self.pool = self.editing.pool
+        self.edits = self.editing.edits
         self._extra_profiles = {}
         self._cancel = None
         self.setObjectName("fmRoot")
@@ -712,18 +713,6 @@ class FileManager(QWidget):
         v.addWidget(bar)
 
     # ----- credentials ----------------------------------------------------
-
-    def _ask_credentials(self, profile, prompt, kind, retry):
-        if kind == "confirm":
-            dlg = CredentialDialog(self.window, f"Verify host — {profile.name}", prompt,
-                                   confirm=True)
-        else:
-            dlg = CredentialDialog(self.window, f"SFTP login — {profile.name}", prompt,
-                                   secret=True, retry=retry)
-        try:
-            return dlg.ask()
-        finally:
-            dlg.deleteLater()
 
     # ----- sources --------------------------------------------------------
 
@@ -1154,27 +1143,10 @@ class FileManager(QWidget):
 
     def launch(self, path, editor=None):
         """Starts the editor on a local file; None, or an error message."""
-        editor = editor or editors.resolve(self.window.config.editor)
-        if editor is None:
-            return ("No text editor was found. Right-click a file and choose "
-                    "Default Editor ▸ Custom Command… to enter one.")
-        try:
-            argv = editors.command_for(editor, path)
-        except ValueError as e:
-            return f"The command of {editor.name} cannot be read: {e}"
-        ok, _pid = QProcess.startDetached(argv[0], argv[1:], os.path.dirname(path))
-        return None if ok else f"{editor.name} could not be started ({argv[0]})."
+        return self.editing.launch(path, editor)
 
     def ask(self, title, text, informative, yes_label):
-        """A question with a safe default (Cancel); True for yes_label."""
-        box = QMessageBox(QMessageBox.Icon.Warning, title, text, parent=self.window)
-        box.setInformativeText(informative)
-        cancel = box.addButton(QMessageBox.StandardButton.Cancel)
-        yes = box.addButton(yes_label, QMessageBox.ButtonRole.AcceptRole)
-        box.setDefaultButton(cancel)
-        box.setEscapeButton(cancel)
-        box.exec()
-        return box.clickedButton() is yes
+        return self.editing.ask(title, text, informative, yes_label)
 
     def notify(self, text, error=False):
         self.status.setText(text.split("\n", 1)[0])
@@ -1192,14 +1164,8 @@ class FileManager(QWidget):
             f.setBold(True)
             edit.setFont(f)
             edit.triggered.connect(lambda: self.edit_file(pane, name))
-            with_ = menu.addMenu("Edit With")
-            for e in found:
-                with_.addAction(QIcon.fromTheme(e.icon), e.name).triggered.connect(
-                    lambda _=False, e=e: self.edit_file(pane, name, e))
-            if found:
-                with_.addSeparator()
-            with_.addAction("Other Command…").triggered.connect(
-                lambda: self._edit_with_command(pane, name))
+            self.editing.fill_edit_with_menu(
+                menu.addMenu("Edit With"), lambda e: self.edit_file(pane, name, e), found)
             if not pane.backend.is_remote and not is_text_name(name):
                 menu.addAction("Open").triggered.connect(lambda: QDesktopServices.openUrl(
                     QUrl.fromLocalFile(pane.backend.join(pane.cwd, name))))
@@ -1213,71 +1179,22 @@ class FileManager(QWidget):
         menu.deleteLater()
 
     def _fill_default_editor_menu(self, menu, found):
-        """Bunny Deck's own editor choice; the desktop's settings are not
-        changed."""
-        current = self.window.config.editor
-        group = QActionGroup(menu)
-
-        def option(text, choice, tip=None):
-            a = menu.addAction(text)
-            a.setCheckable(True)
-            a.setChecked(choice == current)
-            if tip:
-                a.setToolTip(tip)
-            group.addAction(a)
-            a.triggered.connect(lambda: self.set_default_editor(choice))
-            return a
-
-        default = editors.system_default(found)
-        option(f"System Default ({default.name})" if default else "System Default",
-               editors.SYSTEM)
-        for e in found:
-            option(e.name, e.choice).setIcon(QIcon.fromTheme(e.icon))
-        menu.addSeparator()
-        custom = current[len(editors.COMMAND_PREFIX):] \
-            if current.startswith(editors.COMMAND_PREFIX) else ""
-        a = menu.addAction(f"Custom Command: {custom}…" if custom else "Custom Command…")
-        a.setCheckable(True)
-        a.setChecked(bool(custom))
-        group.addAction(a)
-        a.triggered.connect(self.ask_custom_editor)
-        menu.setToolTipsVisible(True)
+        self.editing.fill_default_editor_menu(menu, found)
 
     def set_default_editor(self, choice):
-        self.window.config.set_editor(choice)
-        e = editors.resolve(choice)
-        self.status.setText(f"Files open in {e.name}" if e else "No text editor found")
-
-    def _ask_command(self, title):
-        """A command line for an editor, checked; None when cancelled."""
-        current = self.window.config.editor
-        text = current[len(editors.COMMAND_PREFIX):] \
-            if current.startswith(editors.COMMAND_PREFIX) else ""
-        while True:
-            text, ok = QInputDialog.getText(
-                self.window, title, "Command that opens a file, for example “kate” or "
-                "“konsole -e nvim”.\nThe file is added at the end, or where you put %f.",
-                text=text)
-            if not ok:
-                return None
-            error = editors.check_command(text.strip())
-            if error is None:
-                return text.strip()
-            self.message("Cannot use this command", error, error=True)
+        self.status.setText(self.editing.set_default_editor(choice))
 
     def ask_custom_editor(self):
-        cmd = self._ask_command("Custom Editor")
-        if cmd is not None:
-            self.set_default_editor(editors.COMMAND_PREFIX + cmd)
+        self.editing.ask_custom_editor()
 
     def _edit_with_command(self, pane, name):
-        cmd = self._ask_command("Edit With")
+        cmd = self.editing.ask_command("Edit With")
         if cmd is not None:
             self.edit_file(pane, name, editors.resolve(editors.COMMAND_PREFIX + cmd))
 
     def unsaved_edits(self):
         """Names of files being edited whose last changes are not on their server."""
-        return [s.name for s in self.edits.sessions if s.unsaved or s.busy]
+        return self.editing.unsaved()
 
     # ----- misc -----------------------------------------------------------
 
@@ -1290,6 +1207,4 @@ class FileManager(QWidget):
     def shutdown(self):
         if self._cancel is not None:
             self._cancel.set()
-        for path in self.edits.shutdown():
-            print(f"bunny-deck: kept {path}: its last changes are not on the server")
-        self.pool.close_all()
+        # (The edits and connections are the window's: editing.py.)

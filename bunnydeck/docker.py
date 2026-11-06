@@ -13,6 +13,7 @@ through shlex.quote before they become part of a command.
 
 import json
 import re
+import secrets
 import shlex
 import time
 
@@ -30,6 +31,8 @@ LOG_TAIL = 200
 
 COMPOSE_PROJECT = "com.docker.compose.project"
 COMPOSE_WORKDIR = "com.docker.compose.project.working_dir"
+COMPOSE_FILES = "com.docker.compose.project.config_files"
+COMPOSE_READ_LIMIT = 1024 * 1024  # bytes of a compose file shown at most
 NO_PROJECT = "(no project)"
 
 # Is there a docker command, may we use the daemon, how many containers run.
@@ -65,6 +68,29 @@ def exec_command(container):
 
 def logs_command(container, tail=LOG_TAIL):
     return f"docker logs -f --tail {int(tail)} {shlex.quote(container)}"
+
+
+def compose_edit_command(working_dir, files):
+    """The server's editor on the project's compose files, in its folder.
+    $EDITOR is the user's own setting on that server and may carry options,
+    so it is expanded as it is; the paths are quoted."""
+    _check_compose(working_dir, files)
+    quoted = " ".join(shlex.quote(f) for f in files)
+    return f"cd {shlex.quote(working_dir)} && exec ${{EDITOR:-nano}} {quoted}"
+
+
+def compose_up_command(project, working_dir, files):
+    """`docker compose up -d` with exactly the files the project was started
+    with (an override file included), in its folder."""
+    _check_compose(working_dir, files)
+    fs = " ".join(f"-f {shlex.quote(f)}" for f in files)
+    return (f"cd {shlex.quote(working_dir)} && docker compose -p {shlex.quote(project)} "
+            f"{fs} up -d")
+
+
+def _check_compose(working_dir, files):
+    if not working_dir or not files:
+        raise ValueError("Not a docker compose project (no compose labels).")
 
 
 def compose_logs_command(project, tail=LOG_TAIL):
@@ -161,6 +187,116 @@ def parse_ports(text):
     return out
 
 
+def split_config_files(text, working_dir=""):
+    """The compose files of a project from its config_files label: compose
+    joins them with commas (so a path containing a comma cannot be told
+    apart). Relative paths are taken from the working folder."""
+    out = []
+    for part in (text or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if not part.startswith("/") and working_dir:
+            part = working_dir.rstrip("/") + "/" + part
+        if part not in out:
+            out.append(part)
+    return out
+
+
+def project_info(containers):
+    """{project: (working_dir, [config files])} of the compose projects,
+    from the first container of each that carries the labels."""
+    out = {}
+    for c in containers:
+        if c.is_compose and c.project not in out:
+            out[c.project] = (c.working_dir, list(c.config_files))
+    return out
+
+
+# ----- reading compose files ----------------------------------------------------
+
+
+def compose_read_script(files, nonce):
+    """Prints each file after a line "@@<nonce> <status>" (status: ok,
+    missing, unreadable). The nonce is random per read, so a line inside a
+    file cannot pass for a marker."""
+    lines = ["LC_ALL=C; export LC_ALL"]
+    for f in files:
+        q = shlex.quote(f)
+        lines.append(
+            f'if [ ! -e {q} ]; then echo "@@{nonce} missing"; '
+            f'elif [ ! -r {q} ]; then echo "@@{nonce} unreadable"; '
+            f'else echo "@@{nonce} ok"; head -c {COMPOSE_READ_LIMIT} -- {q}; echo; fi')
+    lines.append(f'echo "@@{nonce} end"')
+    return "\n".join(lines) + "\n"
+
+
+# Why a compose file cannot be edited in a local editor (the safe upload
+# writes a temporary file in the same folder and renames it over the file).
+ACCESS_PROBLEMS = {
+    "missing": "is no longer on the server",
+    "unreadable": "may not be read by this user",
+    "readonly": "may not be written by this user",
+    "folderreadonly": "is in a folder this user may not write to",
+}
+
+
+def compose_access_script(files, nonce):
+    """One line "@@<nonce> <status> " per file: ok, missing, unreadable,
+    readonly or folderreadonly; then "@@<nonce> end"."""
+    lines = ["LC_ALL=C; export LC_ALL"]
+    for f in files:
+        q = shlex.quote(f)
+        d = shlex.quote(f.rsplit("/", 1)[0] or "/")
+        lines.append(
+            f'if [ ! -e {q} ]; then s=missing; elif [ ! -r {q} ]; then s=unreadable; '
+            f'elif [ ! -w {q} ]; then s=readonly; elif [ ! -w {d} ]; then s=folderreadonly; '
+            f'else s=ok; fi; echo "@@{nonce} $s"')
+    lines.append(f'echo "@@{nonce} end"')
+    return "\n".join(lines) + "\n"
+
+
+def parse_compose_access(text, files, nonce):
+    """{path: status} from compose_access_script, or None if incomplete."""
+    marker = f"@@{nonce} "
+    statuses = [line[len(marker):].strip() for line in text.splitlines()
+                if line.startswith(marker)]
+    if not statuses or statuses[-1] != "end" or len(statuses) != len(files) + 1:
+        return None
+    return {f: (st if st == "ok" or st in ACCESS_PROBLEMS else "missing")
+            for f, st in zip(files, statuses)}
+
+
+def new_nonce():
+    return "bd-" + secrets.token_hex(8)
+
+
+def parse_compose_read(text, files, nonce):
+    """[(path, status, content)] for files from compose_read_script's output,
+    or None if it did not run to the end."""
+    marker = f"@@{nonce} "
+    parts, current = [], None
+    ended = False
+    for line in text.split("\n"):
+        if line.startswith(marker):
+            status = line[len(marker):].strip()
+            if status == "end":
+                ended = True
+                break
+            current = [status, []]
+            parts.append(current)
+        elif current is not None:
+            current[1].append(line)
+    if not ended or len(parts) != len(files):
+        return None
+    out = []
+    for path, (status, lines) in zip(files, parts):
+        content = "\n".join(lines[:-1] if lines and lines[-1] == "" else lines)
+        out.append((path, status if status in ("ok", "missing", "unreadable") else "missing",
+                    content if status == "ok" else ""))
+    return out
+
+
 class Container:
     """One line of `docker ps -a --format '{{json .}}'`."""
 
@@ -176,6 +312,12 @@ class Container:
         self.labels = labels if isinstance(labels, dict) else parse_labels(labels)
         self.project = self.labels.get(COMPOSE_PROJECT, "")
         self.working_dir = self.labels.get(COMPOSE_WORKDIR, "")
+        self.config_files = split_config_files(self.labels.get(COMPOSE_FILES, ""),
+                                               self.working_dir)
+
+    @property
+    def is_compose(self):
+        return bool(self.project and self.working_dir and self.config_files)
 
     @property
     def level(self):

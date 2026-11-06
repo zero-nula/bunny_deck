@@ -104,4 +104,4 @@ def test(app):
 
 
 if __name__ == "__main__":
-    run(test)
+    sys.exit(run(test))

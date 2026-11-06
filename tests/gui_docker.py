@@ -72,7 +72,8 @@ def test(app):
     check(dx > tx and dy == ty and dh == th, f"right of its terminal ({geo(win, term)} {geo(win, dp)})")
     tops = [dp.tree.topLevelItem(i).text(0) for i in range(dp.tree.topLevelItemCount())]
     check(tops == ["ai", "web", docker.NO_PROJECT], f"grouped by compose project ({tops})")
-    check(dp.tree.topLevelItem(0).toolTip(0) == "/home/demo/docker/ai", "project folder shown")
+    check(dp.tree.topLevelItem(0).toolTip(0).startswith("/home/demo/docker/ai\n"),
+          "project folder shown")
     db = dp.item_for("db")
     check(db is not None and db.text(1) == "postgres:16" and db.text(3) == "5432/tcp",
           "name, image, ports")
@@ -161,4 +162,4 @@ def test(app):
 
 
 if __name__ == "__main__":
-    run(test)
+    sys.exit(run(test))

@@ -198,6 +198,175 @@ class ScriptTest(unittest.TestCase):
         self.assertIs(docker.parse_probe(r.stdout).has_docker, False)
 
 
+NASTY_DIR = "/srv/my app/x$(touch /tmp/bunnydeck-pwned)'; rm -rf ~; '"
+
+
+def compose_container(project="web", workdir="/srv/my app",
+                      files="/srv/my app/compose.yml,/srv/my app/compose.override.yml"):
+    labels = (f"com.docker.compose.project={project},"
+              f"com.docker.compose.project.working_dir={workdir},"
+              f"com.docker.compose.project.config_files={files},"
+              "com.docker.compose.service=app")
+    return docker.Container({"Names": "app", "State": "running", "Labels": labels})
+
+
+class ComposeLabelsTest(unittest.TestCase):
+    def test_several_files_with_spaces(self):
+        c = compose_container()
+        self.assertTrue(c.is_compose)
+        self.assertEqual(c.config_files, ["/srv/my app/compose.yml",
+                                          "/srv/my app/compose.override.yml"])
+        self.assertEqual(docker.project_info([c]),
+                         {"web": ("/srv/my app", c.config_files)})
+
+    def test_relative_files_and_duplicates(self):
+        self.assertEqual(docker.split_config_files("compose.yml, ./x.yml,compose.yml", "/p"),
+                         ["/p/compose.yml", "/p/./x.yml"])
+        self.assertEqual(docker.split_config_files("", "/p"), [])
+
+    def test_not_compose(self):
+        c = docker.Container({"Names": "solo", "Labels": "maintainer=me"})
+        self.assertFalse(c.is_compose)
+        self.assertEqual(docker.project_info([c]), {})
+        with self.assertRaises(ValueError):
+            docker.compose_up_command("", "", [])
+
+    def test_sample_projects(self):
+        info = docker.project_info(docker.parse_ps(PS_LINES))
+        self.assertEqual(info["ai"], ("/home/demo/docker/ai", ["/home/demo/docker/ai/compose.yml"]))
+
+
+class ComposeCommandTest(unittest.TestCase):
+    FILES = [NASTY_DIR + "/compose.yml", "/srv/my app/compose.override.yml"]
+
+    def test_apply_words(self):
+        cmd = docker.compose_up_command("my project", NASTY_DIR, self.FILES)
+        cd, rest = cmd.split(" && ", 1)
+        self.assertEqual(shlex.split(cd), ["cd", NASTY_DIR])
+        self.assertEqual(shlex.split(rest), ["docker", "compose", "-p", "my project",
+                                             "-f", self.FILES[0], "-f", self.FILES[1],
+                                             "up", "-d"])
+
+    def test_edit_words(self):
+        cmd = docker.compose_edit_command(NASTY_DIR, self.FILES)
+        cd, rest = cmd.split(" && ", 1)
+        self.assertEqual(shlex.split(cd), ["cd", NASTY_DIR])
+        self.assertEqual(shlex.split(rest), ["exec", "${EDITOR:-nano}"] + self.FILES)
+
+    def test_commands_hold_in_sh(self):
+        """Run through sh with harmless stand-ins: the nasty path stays one word."""
+        import tempfile
+        d = tempfile.mkdtemp()
+        nasty = os.path.join(d, "my app", "x$(touch pwned)'; touch pwned2; '")
+        os.makedirs(nasty)
+        cmd = docker.compose_edit_command(nasty, [nasty + "/compose.yml"])
+        r = subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, cwd=d,
+                           env=dict(os.environ, EDITOR="printf %s\\n"))
+        self.assertEqual(r.stdout.splitlines(), [nasty + "/compose.yml"])
+        self.assertFalse(os.path.exists(os.path.join(d, "pwned")))
+        self.assertFalse(os.path.exists(os.path.join(d, "pwned2")))
+        self.assertFalse(os.path.exists(os.path.join(nasty, "pwned")))
+
+
+class ComposeReadTest(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.dir = os.path.join(tempfile.mkdtemp(), "my app", "x$(touch pwned)'q")
+        os.makedirs(self.dir)
+        self.ok = os.path.join(self.dir, "compose.yml")
+        with open(self.ok, "w") as f:
+            f.write("services:\n  web:\n    image: nginx  # a comment\n@@bd-0000 end\n")
+        self.locked = os.path.join(self.dir, "secret.yml")
+        with open(self.locked, "w") as f:
+            f.write("x: 1\n")
+        os.chmod(self.locked, 0)
+        self.missing = os.path.join(self.dir, "gone.yml")
+
+    def read(self, files, nonce):
+        r = subprocess.run(["sh", "-c", docker.compose_read_script(files, nonce)],
+                           capture_output=True, text=True, cwd=self.dir)
+        return docker.parse_compose_read(r.stdout, files, nonce)
+
+    def test_ok_missing_unreadable(self):
+        files = [self.ok, self.missing, self.locked]
+        result = self.read(files, docker.new_nonce())
+        self.assertEqual([s for _p, s, _c in result],
+                         ["ok", "missing", "unreadable" if os.geteuid() else "ok"])
+        self.assertEqual(result[0][2],
+                         "services:\n  web:\n    image: nginx  # a comment\n@@bd-0000 end")
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "pwned")))
+
+    def test_marker_in_the_file_is_not_a_marker(self):
+        # The file holds "@@bd-0000 end"; only the read's own nonce counts.
+        result = self.read([self.ok], docker.new_nonce())
+        self.assertIn("@@bd-0000 end", result[0][2])
+
+    def test_unfinished_read(self):
+        self.assertIsNone(docker.parse_compose_read("@@n ok\nservices:\n", [self.ok], "n"))
+        self.assertIsNone(docker.parse_compose_read("", [self.ok], "n"))
+
+    def test_nonces_differ(self):
+        self.assertNotEqual(docker.new_nonce(), docker.new_nonce())
+
+
+class ComposeAccessTest(unittest.TestCase):
+    """Can a compose file be edited in a local editor (read, written, and its
+    folder written, for the safe upload)?"""
+
+    def setUp(self):
+        import tempfile
+        self.base = tempfile.mkdtemp()
+        self.dir = os.path.join(self.base, "my app", "x$(touch pwned)'q")
+        os.makedirs(self.dir)
+        self.ok = self.make("compose.yml")
+        self.readonly = self.make("ro.yml", 0o444)
+        self.unreadable = self.make("secret.yml", 0)
+        self.locked_dir = os.path.join(self.base, "locked")
+        os.makedirs(self.locked_dir)
+        self.in_locked = os.path.join(self.locked_dir, "compose.yml")
+        with open(self.in_locked, "w") as f:
+            f.write("x: 1\n")
+        os.chmod(self.locked_dir, 0o555)
+        self.addCleanup(os.chmod, self.locked_dir, 0o755)
+
+    def make(self, name, mode=0o644):
+        path = os.path.join(self.dir, name)
+        with open(path, "w") as f:
+            f.write("x: 1\n")
+        os.chmod(path, mode)
+        return path
+
+    def check_access(self, files):
+        nonce = docker.new_nonce()
+        r = subprocess.run(["sh", "-c", docker.compose_access_script(files, nonce)],
+                           capture_output=True, text=True, cwd=self.base)
+        return docker.parse_compose_access(r.stdout, files, nonce)
+
+    def test_statuses(self):
+        if os.geteuid() == 0:
+            self.skipTest("root may read and write everything")
+        missing = os.path.join(self.dir, "gone.yml")
+        got = self.check_access([self.ok, self.readonly, self.unreadable, self.in_locked,
+                                 missing])
+        self.assertEqual(got, {self.ok: "ok", self.readonly: "readonly",
+                               self.unreadable: "unreadable",
+                               self.in_locked: "folderreadonly", missing: "missing"})
+        self.assertFalse(os.path.exists(os.path.join(self.base, "pwned")))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "pwned")))
+
+    def test_every_problem_is_explained(self):
+        for status in ("missing", "unreadable", "readonly", "folderreadonly"):
+            self.assertIn(status, docker.ACCESS_PROBLEMS)
+
+    def test_incomplete_or_forged(self):
+        files = [self.ok]
+        self.assertIsNone(docker.parse_compose_access("", files, "n"))
+        self.assertIsNone(docker.parse_compose_access("@@n ok\n", files, "n"))
+        self.assertIsNone(docker.parse_compose_access("@@other ok\n@@other end\n", files, "n"))
+        self.assertEqual(docker.parse_compose_access("@@n weird\n@@n end\n", files, "n"),
+                         {self.ok: "missing"})
+
+
 class ConfigTest(unittest.TestCase):
     def test_round_trip_and_old_files(self):
         import tempfile

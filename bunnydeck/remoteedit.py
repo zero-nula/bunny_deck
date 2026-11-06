@@ -30,7 +30,7 @@ import shutil
 import stat
 import threading
 
-from PyQt6.QtCore import QFileSystemWatcher, QObject, QTimer
+from PyQt6.QtCore import QFileSystemWatcher, QObject, QTimer, pyqtSignal
 
 from . import sftp
 from .connections import run_on_main_sync
@@ -65,9 +65,10 @@ def _signature(attrs):
 class EditSession:
     """One remote file open in an editor."""
 
-    def __init__(self, profile, remote, local, mode, remote_sig, digest):
+    def __init__(self, profile, remote, local, mode, remote_sig, digest, requested=None):
         self.profile = profile
         self.remote = remote        # absolute path on the server (symlinks resolved)
+        self.requested = requested or remote  # the path as it was asked for
         self.local = local
         self.folder = os.path.dirname(local)
         self.mode = mode
@@ -84,6 +85,10 @@ class EditSession:
 
 
 class RemoteEdits(QObject):
+    """saved(session): a save in the editor reached the server."""
+
+    saved = pyqtSignal(object)
+
     def __init__(self, pool, ui):
         super().__init__()
         self.pool = pool
@@ -97,8 +102,8 @@ class RemoteEdits(QObject):
     # ----- opening --------------------------------------------------------
 
     def find(self, profile_id, remote):
-        return next((s for s in self.sessions
-                     if s.profile.id == profile_id and s.remote == remote), None)
+        return next((s for s in self.sessions if s.profile.id == profile_id
+                     and remote in (s.remote, s.requested)), None)
 
     def open(self, profile, client, path, editor=None):
         """Opens a remote file in the editor (or the given one). A file that
@@ -155,7 +160,7 @@ class RemoteEdits(QObject):
                 raise _Stop(None)
             mode = stat.S_IMODE(attrs.permissions or 0o644)
             session = EditSession(profile, remote, local, mode, _signature(attrs),
-                                  hashlib.sha256(data).hexdigest())
+                                  hashlib.sha256(data).hexdigest(), requested=path)
             folder = None  # the session owns it now
             call_soon(lambda: self._opened(session, editor, key))
         except _Stop as e:
@@ -289,6 +294,7 @@ class RemoteEdits(QObject):
             session.remote_sig = sig
             session.unsaved = False
             self.ui.notify(f"Saved {session.name} to {session.profile.name}")
+            self.saved.emit(session)
         if session.again:
             self._check(session)
 

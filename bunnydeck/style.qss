@@ -1104,3 +1104,48 @@ QRadioButton::indicator:checked {
 QRadioButton::indicator:disabled {
     border-color: #262b33;
 }
+
+/* Compose view (composeview.py) */
+QPlainTextEdit#composeText {
+    background-color: #0e1013;
+    color: #c9ced6;
+    border: none;
+    selection-background-color: #1a2436;
+}
+
+QTabWidget#composeTabs, QTabWidget#composeTabs QTabBar {
+    background-color: #121418;
+}
+
+QTabWidget#composeTabs::pane {
+    border: none;
+}
+
+QTabWidget#composeTabs QTabBar::tab {
+    background: #121418;
+    color: #8a919c;
+    padding: 5px 12px;
+    border: none;
+    border-bottom: 2px solid transparent;
+}
+
+QTabWidget#composeTabs QTabBar::tab:selected {
+    color: #e6e9ef;
+    border-bottom: 2px solid #5b8def;
+}
+
+/* Toast: a short message at the bottom right (toast.py) */
+QFrame#toast {
+    background-color: #1a1d23;
+    border: 1px solid #2c323c;
+    border-radius: 10px;
+}
+
+QFrame#toast[error="true"] {
+    border-color: #5c2b2b;
+    background-color: #2a1416;
+}
+
+QLabel#toastText {
+    color: #e6e9ef;
+}

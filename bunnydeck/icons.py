@@ -288,6 +288,17 @@ def _attach(p):  # an arrow going into a window
     p.drawLine(QPointF(10, 14), QPointF(16, 14))
 
 
+def _edit(p):  # a pencil
+    path = QPainterPath(QPointF(5, 19))
+    path.lineTo(QPointF(6, 15))
+    path.lineTo(QPointF(16, 5))
+    path.lineTo(QPointF(19, 8))
+    path.lineTo(QPointF(9, 18))
+    path.closeSubpath()
+    p.drawPath(path)
+    p.drawLine(QPointF(14, 7), QPointF(17, 10))
+
+
 DRAW = {
     "plus": _plus, "terminal": _terminal, "saved": _saved, "ai": _ai, "radar": _radar,
     "broadcast": _broadcast, "split-v": _split_v, "split-h": _split_h, "folder": _folder,
@@ -295,7 +306,7 @@ DRAW = {
     "close": _close, "import": _import, "search": _search, "layouts": _layouts,
     "folder-plus": _folder_plus, "trash": _trash, "eye": _eye, "arrow-up": _arrow_up,
     "arrow-right": _arrow_right, "arrow-left": _arrow_left, "home": _home, "refresh": _refresh,
-    "key": _key, "stats": _stats, "docker": _docker, "shield": _shield, "detach": _detach,
+    "key": _key, "stats": _stats, "docker": _docker, "shield": _shield, "detach": _detach, "edit": _edit,
     "attach": _attach,
 }
 

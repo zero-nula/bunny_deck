@@ -35,12 +35,26 @@ class DockerPanel(BasePanel):
     shellRequested = pyqtSignal(object, str)  # (panel, container name)
     logsRequested = pyqtSignal(object, str)  # (panel, container name)
     projectLogsRequested = pyqtSignal(object, str)  # (panel, compose project)
+    # (panel, compose project): View compose / Edit compose / Apply (up -d);
+    # the project's folder and files are in panel.projects.
+    composeViewRequested = pyqtSignal(object, str)
+    # (panel, project, editor or None for Bunny Deck's chosen one): in a
+    # local editor; composeTerminalEditRequested: in the server's $EDITOR.
+    composeEditRequested = pyqtSignal(object, str, object)
+    composeTerminalEditRequested = pyqtSignal(object, str)
+    composeApplyRequested = pyqtSignal(object, str)
     runningChanged = pyqtSignal(object, int)  # (panel, running containers)
 
     def __init__(self, profile, argv_for=None, parent=None):
         super().__init__(profile, parent)
         self.argv_for = argv_for or (lambda script: docker.ssh_argv(profile.ssh_args(), script))
         self.containers = []
+        # {project: (working_dir, [compose files])} from the labels.
+        self.projects = {}
+        self._by_name = {}
+        # Set by the window: fill_edit_with(menu, on_editor) adds the
+        # installed editors and "Custom Command…" (editing.py).
+        self.fill_edit_with = None
         self.running_count = None
         self.problem = None  # (kind, message) while there is one
         self._watch = None
@@ -181,6 +195,8 @@ class DockerPanel(BasePanel):
     def show_containers(self, containers):
         self.problem = None
         self.containers = containers
+        self.projects = docker.project_info(containers)
+        self._by_name = {c.name: c for c in containers}
         running = sum(1 for c in containers if c.running)
         self.count_label.setText(f"{running}/{len(containers)} running")
         self._set_dot(f"{running} of {len(containers)} containers running", "ok")
@@ -212,7 +228,8 @@ class DockerPanel(BasePanel):
             top.setData(0, ROLE_PROJECT, project)
             top.setFont(0, bold)
             top.setIcon(0, icons.icon("folder"))
-            top.setToolTip(0, workdir or "Containers that are not part of a compose project")
+            top.setToolTip(0, (f"{workdir}\nDouble-click to view the compose file"
+                               if workdir else "Containers that are not part of a compose project"))
             top.setForeground(2, QColor("#8a919c"))
             top.setFirstColumnSpanned(False)
             t.addTopLevelItem(top)
@@ -238,8 +255,61 @@ class DockerPanel(BasePanel):
 
     def _double_clicked(self, item, _column):
         name = item.data(0, ROLE_CONTAINER)
+        project = item.data(0, ROLE_PROJECT)
         if name:
             self.shellRequested.emit(self, name)
+        elif project in self.projects:
+            self.composeViewRequested.emit(self, project)
+
+    def compose_project_of(self, item):
+        """(project, why not) for a tree row: the compose project the
+        compose actions act on, or None and the reason they are greyed."""
+        if item is None:
+            return None, ""
+        name = item.data(0, ROLE_CONTAINER)
+        project = item.data(0, ROLE_PROJECT)
+        if name:
+            c = self._by_name.get(name)
+            if c is not None and c.is_compose and c.project in self.projects:
+                return c.project, ""
+            return None, ("This container was not started by docker compose: it has no "
+                          "compose labels, so there is no compose file to show.")
+        if project in self.projects:
+            return project, ""
+        return None, ("These containers were not started by docker compose, so there is "
+                      "no compose file.")
+
+    def _add_compose_actions(self, menu, item):
+        project, why = self.compose_project_of(item)
+        ok = project is not None
+
+        def action(text, tip, slot):
+            a = menu.addAction(text)
+            a.setEnabled(ok)
+            a.setToolTip(tip if ok else why)
+            if ok:
+                a.triggered.connect(slot)
+            return a
+
+        action("View compose", "Show the compose files (read-only)",
+               lambda: self.composeViewRequested.emit(self, project))
+        edit = action("Edit compose", "Open the compose files in your editor on this "
+                      "computer; every save is uploaded to the server",
+                      lambda: self.composeEditRequested.emit(self, project, None))
+        f = edit.font()
+        f.setBold(ok)
+        edit.setFont(f)
+        with_ = menu.addMenu("Edit With")
+        with_.setEnabled(ok)
+        with_.setToolTipsVisible(True)
+        if ok and self.fill_edit_with is not None:
+            self.fill_edit_with(with_, lambda e: self.composeEditRequested.emit(
+                self, project, e))
+        action("Edit in terminal ($EDITOR)", "Open the compose files in the server's editor "
+               "($EDITOR, else nano) in a terminal",
+               lambda: self.composeTerminalEditRequested.emit(self, project))
+        action("Apply (up -d)", "Run docker compose up -d in the project's folder, in a "
+               "terminal", lambda: self.composeApplyRequested.emit(self, project))
 
     def _context_menu(self, pos):
         item = self.tree.itemAt(pos)
@@ -251,12 +321,17 @@ class DockerPanel(BasePanel):
                 lambda: self.shellRequested.emit(self, name))
             menu.addAction(icons.icon("saved"), "Logs").triggered.connect(
                 lambda: self.logsRequested.emit(self, name))
-            menu.addSeparator()
             menu.addAction("Copy name").triggered.connect(
                 lambda: QGuiApplication.clipboard().setText(name))
-        elif project and project != docker.NO_PROJECT:
-            menu.addAction(icons.icon("saved"), "Logs").triggered.connect(
-                lambda: self.projectLogsRequested.emit(self, project))
+            menu.addSeparator()
+            self._add_compose_actions(menu, item)
+        elif project:
+            logs = menu.addAction(icons.icon("saved"), "Logs")
+            logs.setEnabled(project != docker.NO_PROJECT)
+            logs.triggered.connect(lambda: self.projectLogsRequested.emit(self, project))
+            menu.addSeparator()
+            self._add_compose_actions(menu, item)
+        menu.setToolTipsVisible(True)
         if menu.actions():
             menu.addSeparator()
         menu.addAction(self.detach_btn.icon(), self.detach_btn.text()).triggered.connect(

@@ -27,7 +27,10 @@ from .dialogs import (
 from .layout import (
     ABOVE, BELOW, HORIZONTAL_SPLIT, LEFT, RIGHT, SWAP, VERTICAL_SPLIT, SplitLayout,
 )
+from .composeview import ComposeViewPanel
 from .detach import DetachedWindow, ask_close, place_of
+from .editing import Editing
+from .toast import Toast
 from .dockerpanel import DockerPanel
 from .firewalldialog import FirewallDialog
 from .sidebar import LOCAL_ID, ConnectionSidebar
@@ -48,6 +51,16 @@ class MainWindow(QMainWindow):
         self.config = config
         self.active_panel = None
         self.file_manager = None
+        # Editing files in a local editor, shared by the file manager and the
+        # Docker panel's compose files (editing.py).
+        self.editing = Editing(self)
+        self.editing.show_message = self._edit_message
+        self.editing.show_error = self._edit_error
+        self.editing.saved.connect(self._on_edit_saved)
+        # (profile id, path) -> (profile, project, working dir, files) of
+        # compose files open in a local editor.
+        self._compose_edits = {}
+        self.toast = Toast(self)
         self.network_scan = None
         self.snap_popup = None
         # One unsaved profile shared by all local terminals, so a colour
@@ -632,6 +645,13 @@ class MainWindow(QMainWindow):
             lambda p, project: self._container_terminal(
                 p, docker.compose_logs_command(project), f"Logs: {project}"))
         panel.runningChanged.connect(self._on_docker_running)
+        panel.composeViewRequested.connect(self.open_compose_view)
+        panel.composeEditRequested.connect(
+            lambda p, project, editor: self.edit_compose(*self._compose_ref(p, project),
+                                                         editor=editor))
+        panel.composeTerminalEditRequested.connect(self._compose_edit)
+        panel.composeApplyRequested.connect(self._compose_apply)
+        panel.fill_edit_with = self._fill_edit_with
         self.layout_.add_panel(panel, near=ref)
         if ref is not None:
             self.layout_.move_panel(panel, ref, RIGHT)
@@ -707,6 +727,151 @@ class MainWindow(QMainWindow):
             self.show_terminals()
             self._focus_panel(panel)
         return panel
+
+    def open_compose_view(self, docker_panel, project):
+        """The compose files of a project, read-only, below the Docker panel
+        (the open one for that project is refreshed and shown instead)."""
+        profile = docker_panel.profile
+        for p in self.all_panels():
+            if (isinstance(p, ComposeViewPanel) and p.profile.id == profile.id
+                    and p.project == project):
+                p.refresh()
+                self.show_terminals()
+                self._focus_panel(p)
+                return p
+        working_dir, files = docker_panel.projects[project]
+        panel = ComposeViewPanel(profile, project, working_dir, files)
+        self._wire_panel(panel)
+        panel.fill_edit_with = self._fill_edit_with
+        panel.editRequested.connect(lambda p, paths, editor: self.edit_compose(
+            p.profile, p.project, p.working_dir, p.files, editor=editor, only=paths))
+        panel.terminalEditRequested.connect(lambda p, paths: self._compose_edit_terminal(
+            p.profile, p.project, p.working_dir, paths))
+        panel.applyRequested.connect(lambda p: self.apply_compose(
+            p.profile, p.project, p.working_dir, p.files))
+        self.layout_.add_panel(panel, near=docker_panel)
+        if docker_panel in self.layout_.panels:
+            self.layout_.move_panel(panel, docker_panel, BELOW)
+            self._clear_presets()
+        self.show_terminals()
+        self._focus_panel(panel)
+        self._on_panel_focused(panel)
+        return panel
+
+    # ----- compose files: edit, apply -------------------------------------
+
+    def _compose_ref(self, docker_panel, project):
+        working_dir, files = docker_panel.projects[project]
+        return docker_panel.profile, project, working_dir, list(files)
+
+    def edit_compose(self, profile, project, working_dir, files, editor=None, only=None):
+        """Opens a project's compose files (or only some of them) in the
+        local editor, each on its own (remoteedit.py: every save is uploaded).
+        First checks over the shared connection that each can be read and
+        written; the others are offered in a terminal (where sudo can help)."""
+        targets = list(only or files)
+        nonce = docker.new_nonce()
+        check = remote.RemoteScript(
+            profile.ssh_args(), docker.compose_access_script(targets, nonce),
+            parse=lambda text: docker.parse_compose_access(text, targets, nonce),
+            delays=(0,), ssh_binary=lambda: docker.SSH_BINARY, parent=self)
+        check.output.connect(lambda statuses: self._compose_access_checked(
+            profile, project, working_dir, files, targets, editor, statuses))
+        check.gave_up.connect(lambda: self._edit_error(
+            "Not connected", f"Bunny Deck is not connected to {profile.name}. Open its "
+            "terminal first; the files are opened over that connection."))
+        check.start()
+        return check
+
+    def _compose_access_checked(self, profile, project, working_dir, files, targets, editor,
+                                statuses):
+        bad = [f for f in targets if statuses.get(f) != "ok"]
+        for f in targets:
+            if f not in bad:
+                self._compose_edits[(profile.id, f)] = (profile, project, working_dir, files)
+                self.editing.open_remote(profile, f, editor)
+        if bad:
+            lines = "\n".join(f"{f} {docker.ACCESS_PROBLEMS[statuses.get(f, 'missing')]}."
+                               for f in bad)
+            if self._confirm(
+                "Cannot edit here",
+                f"{lines}\n\nEdit {'it' if len(bad) == 1 else 'them'} in a terminal on "
+                f"{profile.name} instead? There you can use sudo if the file belongs to "
+                "another user.",
+                "Edit in Terminal",
+            ):
+                self._compose_edit_terminal(profile, project, working_dir, bad)
+
+    def _on_edit_saved(self, session):
+        """A compose file was uploaded: refresh its view, offer Apply (never
+        applied on its own)."""
+        ref = self._compose_edits.get((session.profile.id, session.requested)) or \
+            self._compose_edits.get((session.profile.id, session.remote))
+        if ref is None:
+            return
+        profile, project, working_dir, files = ref
+        for p in self.all_panels():
+            if (isinstance(p, ComposeViewPanel) and p.profile.id == profile.id
+                    and p.project == project):
+                p.refresh()
+        self.toast.show_message(
+            f"Saved {session.name} to {profile.name}.", "Apply (up -d)",
+            lambda: self.apply_compose(profile, project, working_dir, files))
+
+    def _compose_edit_terminal(self, profile, project, working_dir, files):
+        """The server's $EDITOR (else nano) on the files, in a terminal."""
+        return self._compose_terminal(
+            profile, docker.compose_edit_command(working_dir, files), f"Edit: {project}")
+
+    def _compose_edit(self, docker_panel, project):
+        return self._compose_edit_terminal(*self._compose_ref(docker_panel, project))
+
+    def apply_compose(self, profile, project, working_dir, files):
+        """docker compose up -d, after saying what it will run (it recreates
+        containers whose configuration changed)."""
+        command = docker.compose_up_command(project, working_dir, files)
+        if not self._confirm(
+            f"Apply “{project}”?",
+            "Starts the project with its current compose files; containers whose "
+            f"configuration changed are recreated. On {profile.name} this runs:"
+            f"\n\n{command}",
+            "Apply",
+        ):
+            return None
+        return self._compose_terminal(profile, command, f"Apply: {project}")
+
+    def _compose_apply(self, docker_panel, project):
+        return self.apply_compose(*self._compose_ref(docker_panel, project))
+
+    def _compose_terminal(self, profile, command, title):
+        """A terminal for a compose command: below the connection's Docker
+        panel if it is in the layout, else where terminals open."""
+        dp = self.docker_panel_for(profile)
+        beside = (dp, BELOW) if dp is not None and dp in self.layout_.panels else None
+        return self.open_profile(profile, remote_command=command, title=title, beside=beside)
+
+    def _fill_edit_with(self, menu, on_editor):
+        self.editing.fill_edit_with_menu(menu, on_editor, other_text="Custom Command…")
+
+    # ----- messages from editing --------------------------------------------
+
+    def _edit_message(self, text, error):
+        line = text.split("\n", 1)[0]
+        if self.current_view() == "files" and self.file_manager is not None:
+            self.file_manager.status.setText(line)
+        elif not error:
+            self.toast.show_message(line)
+
+    def _edit_error(self, title, text):
+        if self.current_view() == "files" and self.file_manager is not None:
+            self.file_manager.message(title, text, error=True)
+        else:
+            self.editing._message_box(title, text)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if self.toast.isVisible():
+            self.toast.place()
 
     def docker_argv_for(self, profile):
         """How a Docker panel runs its script (tests replace this)."""
@@ -1111,7 +1276,7 @@ class MainWindow(QMainWindow):
         ):
             event.ignore()
             return
-        unsaved = self.file_manager.unsaved_edits() if self.file_manager is not None else []
+        unsaved = self.editing.unsaved()
         if unsaved and not self._confirm(
             "Quit Bunny Deck?",
             "These files have changes that are not saved on their server: "
@@ -1137,6 +1302,7 @@ class MainWindow(QMainWindow):
             win.close()
         if self.file_manager is not None:
             self.file_manager.shutdown()
+        self.editing.shutdown()
         if self.network_scan is not None:
             self.network_scan.scanner.stop()
             self.network_scan.close()
@@ -1149,6 +1315,8 @@ class MainWindow(QMainWindow):
             # Saved connections only; restored without opening a terminal.
             return ({"kind": "docker", "profile": profile.id}
                     if self.config.get(profile.id) is not None else None)
+        if isinstance(panel, ComposeViewPanel):
+            return None  # a view; open it again from the Docker panel
         if panel.remote_command is not None:
             return None  # a container shell or logs: not started again on its own
         if profile is self.local_profile:
