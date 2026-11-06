@@ -240,6 +240,54 @@ def _stats(p):  # a bar chart
         p.drawLine(QPointF(x, 17), QPointF(x, top))
 
 
+def _docker(p):  # a whale with a spout
+    body = QPainterPath(QPointF(3, 13))
+    body.lineTo(QPointF(17, 13))
+    body.cubicTo(QPointF(19.5, 13), QPointF(20.5, 11.5), QPointF(21, 10))
+    body.cubicTo(QPointF(21, 15.5), QPointF(17, 19.5), QPointF(11, 19.5))
+    body.cubicTo(QPointF(6.5, 19.5), QPointF(3.5, 17), QPointF(3, 13))
+    p.drawPath(body)
+    tail = QPainterPath(QPointF(21, 10))
+    tail.lineTo(QPointF(19.5, 7.5))
+    tail.moveTo(QPointF(21, 10))
+    tail.lineTo(QPointF(22.5, 7.8))
+    p.drawPath(tail)
+    p.drawLine(QPointF(9, 10.5), QPointF(9, 7))
+    p.drawLine(QPointF(9, 7.5), QPointF(7, 5.5))
+    p.drawLine(QPointF(9, 7.5), QPointF(11, 5.5))
+    pen = p.pen()
+    p.setBrush(pen.color())
+    p.setPen(Qt.PenStyle.NoPen)
+    p.drawEllipse(QPointF(7, 15.5), 1.0, 1.0)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+
+
+def _shield(p):  # a shield with a check: the firewall
+    path = QPainterPath(QPointF(12, 3))
+    path.lineTo(QPointF(19.5, 6))
+    path.cubicTo(QPointF(19.5, 13), QPointF(16.5, 18.5), QPointF(12, 21))
+    path.cubicTo(QPointF(7.5, 18.5), QPointF(4.5, 13), QPointF(4.5, 6))
+    path.closeSubpath()
+    p.drawPath(path)
+    p.drawLine(QPointF(8.5, 12), QPointF(11, 14.5))
+    p.drawLine(QPointF(11, 14.5), QPointF(15.5, 9.5))
+
+
+def _detach(p):  # a window with an arrow leaving it
+    p.drawRoundedRect(QRectF(3.5, 7.5, 12, 12), 2, 2)
+    p.drawLine(QPointF(10, 14), QPointF(20, 4))
+    p.drawLine(QPointF(14, 4), QPointF(20, 4))
+    p.drawLine(QPointF(20, 4), QPointF(20, 10))
+
+
+def _attach(p):  # an arrow going into a window
+    p.drawRoundedRect(QRectF(3.5, 7.5, 12, 12), 2, 2)
+    p.drawLine(QPointF(20, 4), QPointF(10, 14))
+    p.drawLine(QPointF(10, 8), QPointF(10, 14))
+    p.drawLine(QPointF(10, 14), QPointF(16, 14))
+
+
 DRAW = {
     "plus": _plus, "terminal": _terminal, "saved": _saved, "ai": _ai, "radar": _radar,
     "broadcast": _broadcast, "split-v": _split_v, "split-h": _split_h, "folder": _folder,
@@ -247,7 +295,8 @@ DRAW = {
     "close": _close, "import": _import, "search": _search, "layouts": _layouts,
     "folder-plus": _folder_plus, "trash": _trash, "eye": _eye, "arrow-up": _arrow_up,
     "arrow-right": _arrow_right, "arrow-left": _arrow_left, "home": _home, "refresh": _refresh,
-    "key": _key, "stats": _stats,
+    "key": _key, "stats": _stats, "docker": _docker, "shield": _shield, "detach": _detach,
+    "attach": _attach,
 }
 
 
@@ -266,6 +315,11 @@ def _pixmap(name, color, size, dpr):
     DRAW[name](p)
     p.end()
     return pm
+
+
+def pixmap(name, color=NORMAL, size=SIZE, dpr=1.0):
+    """One icon as a pixmap (for painting it in a delegate)."""
+    return _pixmap(name, color, size, max(1.0, dpr))
 
 
 def icon(name, color=NORMAL, on_color=ON, size=SIZE):

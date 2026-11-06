@@ -94,6 +94,41 @@ class Appearance:
             and not self.image
 
 
+# What the last Docker check found on a server (docker.py). error is "" when
+# Docker answered, otherwise "denied" (the user may not use the daemon),
+# "daemon" (the daemon does not run) or "other"; message explains it.
+DOCKER_ERRORS = ("", "denied", "daemon", "other")
+
+
+@dataclass
+class DockerInfo:
+    has_docker: object = None  # True / False, None: not checked yet
+    running: int = 0
+    checked: float = 0.0  # time.time() of the last check
+    error: str = ""
+    message: str = ""
+
+    @property
+    def usable(self):
+        return self.has_docker is True and not self.error
+
+    @classmethod
+    def from_dict(cls, d):
+        if not isinstance(d, dict):
+            return cls()
+        has = d.get("has_docker")
+        try:
+            running = max(0, int(d.get("running", 0) or 0))
+            checked = float(d.get("checked", 0) or 0)
+        except (TypeError, ValueError):
+            running, checked = 0, 0.0
+        error = d.get("error", "")
+        message = d.get("message", "")
+        return cls(has_docker=has if has in (True, False) else None, running=running,
+                   checked=checked, error=error if error in DOCKER_ERRORS else "other",
+                   message=message if isinstance(message, str) else "")
+
+
 @dataclass
 class Profile:
     name: str
@@ -103,6 +138,7 @@ class Profile:
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     appearance: Appearance = field(default_factory=Appearance)
     kind: str = KIND_SSH
+    docker: DockerInfo = field(default_factory=DockerInfo)
 
     @property
     def is_local(self):
@@ -151,6 +187,7 @@ class Profile:
             port=port,
             appearance=Appearance.from_dict(d.get("appearance")),
             kind=kind,
+            docker=DockerInfo.from_dict(d.get("docker")),
         )
 
 
@@ -306,6 +343,14 @@ class Config:
 
     def set_editor(self, choice):
         self.editor = choice or ""
+        self.save()
+
+    def set_docker(self, profile_id, info):
+        """Stores the result of a Docker check of a saved connection."""
+        p = self.get(profile_id)
+        if p is None:
+            return
+        p.docker = info
         self.save()
 
     def update_appearance(self, profile_id, appearance):

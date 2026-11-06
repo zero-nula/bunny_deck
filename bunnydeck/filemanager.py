@@ -664,8 +664,9 @@ class FileManager(QWidget):
         self.to_left.setToolTip("Copy the selected files from the right side into the folder "
                                 "on the left")
         self.to_left.clicked.connect(lambda: self.copy_selection(self.right, self.left))
-        copy_label = QLabel("Copy")
-        copy_label.setObjectName("dimLabel")
+        # A caption for the two arrows (not a control, so not dimmed like one).
+        copy_label = QLabel("COPY")
+        copy_label.setObjectName("copyCaption")
         copy_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         mid.addWidget(copy_label)
         mid.addWidget(self.to_right)
@@ -735,7 +736,7 @@ class FileManager(QWidget):
     def sessions_changed(self):
         sources = [(LOCAL_ID, "This computer", icons.icon("terminal"))]
         seen = {LOCAL_ID}
-        for panel in self.window.layout_.panels:
+        for panel in self.window.all_panels():
             p = panel.profile
             if p.is_local:
                 continue  # not an SFTP source: "Local (this computer)" is the same place

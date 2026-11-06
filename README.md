@@ -16,6 +16,8 @@ KDE Plasma in mind and works on other desktops too.
 - **Your SSH setup just works**: keys, ssh-agent, `~/.ssh/config` and `known_hosts` are used exactly as on the command line, because Bunny Deck runs the system `ssh`. Passwords are asked when needed and never stored.
 - **Key login in a few clicks**: Bunny Deck can create an SSH key, add it to a server, check that it works and add the server to `~/.ssh/config` — and import the hosts you already have there.
 - **One connection per server**: terminals and the file manager share it, so you log in once, and further terminals and the file manager open instantly.
+- **Docker**: on servers with Docker, see the containers grouped by compose project and open a shell or the logs of one with a click, over the connection you already have.
+- **Firewall**: allow a port on a server (from your LAN, one address or anywhere) with ufw, and see or delete its rules. Bunny Deck never sees your sudo password.
 - **Network scan**: a live map of the devices on your network (router, servers, NAS, printers, phones…) with their open ports, found with `nmap` (install it separately on existing installs, see [Updating](#updating)). Double-click an SSH server to connect to it.
 - **AI menu**: your own list of command line AI assistants (for example `claude`, `codex` or `opencode`), each opened in its own terminal with one click.
 - **Backgrounds**: per connection colour, transparency and an optional background image. A Bunny Deck badge to use as one is in `data/backgrounds/`.
@@ -146,10 +148,11 @@ The other toolbar buttons are icons; hover over one to see its name and shortcut
   When a session ends (the server went away, you typed `exit`, the network dropped), a blue **Reconnect** button appears in its header (**Restart** for a local terminal); click it or press **Enter** in the terminal, and a new session opens in exactly the same place, with the same background and font size. In the sidebar the connection's count badge turns red, and right-clicking it offers **Reconnect** too (for a session that still runs but hangs, it asks first and then replaces it).
   Move the mouse over a header to show its buttons: **Move** (arrows) and **Background** (picture). **✕** closes the terminal. Right-click in a terminal for Copy, Paste and **Files for this connection**.
 - **Snap layouts**, as in Windows 11: click **Move** (the arrows in a terminal's header), the layout button in the toolbar (next to the two split buttons) or press Ctrl+Shift+L. A popup shows layouts (two or three columns, one big terminal with two or three beside it, a grid, …); click the part of a layout where the terminal should go, and the other terminals fill the rest.
+- **Detach** (the window-with-arrow button in a header, or right-click → **Detach**) moves a terminal or Docker panel into a window of its own, for example onto a second screen. It keeps running: same session, scrollback, font and colours. **Attach** in its header (or right-click) puts it back where it was. If that place is gone, it goes next to a terminal of the same connection, or at the end. Closing a detached window asks whether to attach it back or close the session. Detached terminals still take part in broadcast and count as open in the sidebar. The next start opens them in the main window.
 - **Drag a terminal by its header** (the empty part of it; it lights up blue while you hold it) onto another one: a blue preview shows where it will land. Near an edge it goes beside (left, right, above, below); in the middle the two swap places.
 - **Move → Next to a terminal…** places the terminal left of, right of, above or below another terminal, so you can build any mix of rows and columns.
   Sessions keep running; nothing reconnects. The layout buttons re-arrange all terminals uniformly again.
-- **Copy and paste**: Ctrl+Shift+C / Ctrl+Shift+V, Shift+Insert, middle-click, or the right-click menu.
+- **Copy and paste**: Ctrl+Shift+C / Ctrl+Shift+V, Shift+Insert, middle-click, or the right-click menu. Programs that use the mouse themselves (Claude Code, vim, htop, tmux with mouse on) make and copy their own selection, which the terminal's Copy does not see; hold **Shift** while dragging to select in the terminal instead.
 - **Files** (top right in the toolbar, or Ctrl+Shift+F) opens the file manager inside the main window, with the current terminal's computer on the right. The terminals keep running; switch back with **Files** again or **Back to terminals**.
   - Each side has its own source (This computer, or any open or saved connection, with its colour), Up, Home, the folder as clickable parts (click the free space after them to type a path; Esc goes back), Reload, and icons for hidden files, New Folder and Delete.
   - Files show the icon of their type from your desktop's icon theme; dates read like *Today 14:32*.
@@ -165,6 +168,58 @@ The other toolbar buttons are icons; hover over one to see its name and shortcut
 - **Background**: pick a background colour, opacity and an optional image (Fill, Fit, Stretch or Center) for the profile.
   The change applies live to every session of that profile. **Save** stores it; **Reset to Default** restores the default.
   The chosen image is copied to `~/.config/bunny-deck/backgrounds/`, so it stays even if the original is moved.
+
+### Docker
+
+When you connect to a server, Bunny Deck checks in the background whether it
+has Docker. It does so over the connection you just opened, so you never log
+in twice. If it does, the server's row in the sidebar shows a small whale with
+the number of running containers.
+
+- **Open the Docker panel**: right-click the server in the sidebar, or right-click in
+  its terminal, and choose **Docker…**. It opens to the right of the server's
+  terminal and moves, snaps and drags like a terminal.
+- The panel lists the containers **by compose project**. Containers without one are
+  under *(no project)*. Each shows its image, its status and its published
+  ports. The dot is green while it runs, orange while its health check starts,
+  red when it is unhealthy or restarting, and grey when it is stopped. The list
+  refreshes every few seconds while the panel is visible, and stops when it is
+  hidden or closed.
+- **Double-click a container** for a shell in it (`bash` if it has one, else `sh`),
+  in a new terminal below the panel. **Right-click** a container for **Shell**,
+  **Logs** (`docker logs -f`) or **Copy name**, or a project for its **Logs**
+  (`docker compose logs -f`). Logs open as ordinary terminals: scroll, search
+  and copy as usual, and close them when you are done.
+- **Permission denied**: if your user may not use Docker, the whale turns grey
+  and the panel explains how to fix it. Add the user to the `docker` group
+  (`sudo usermod -aG docker $USER`), then log in again.
+- Bunny Deck runs the `docker` command on the server. It needs no extra
+  software on either side.
+
+### Firewall
+
+Right-click a server in the sidebar (or in its terminal) and choose
+**Firewall…** to manage its **ufw** firewall.
+
+- **Allow a port**: one port (`8080`) or a range (`8000:8010`), TCP, UDP or
+  both. Choose who may connect:
+  - **LAN** (the default): the server's own network, found over the
+    connection.
+  - **One address or network**: for example `192.168.1.20` or `10.0.0.0/24`.
+  - **Anywhere**: shown with a warning.
+
+  An optional comment shows up in the rule list. The window always shows the
+  exact command it will run.
+- **Rules**: the server's rules (`ufw status numbered`). Select one and click
+  **Delete**; ufw then shows the rule and asks `(y|n)` in the terminal.
+- **Your password stays yours**: every `sudo` command is typed into a
+  **Firewall terminal** below the server's terminal. You see the command and
+  enter your sudo password there. Bunny Deck never sees or stores it. sudo
+  remembers it for that terminal for a while (usually 15 minutes), so you type
+  it once, not for every rule.
+- If ufw is not installed, or installed but not enabled, the window says so. It
+  never enables ufw itself, because that can cut off SSH. Allow SSH first
+  (`sudo ufw allow OpenSSH`), then run `sudo ufw enable` in the terminal.
 
 ### Keyboard shortcuts
 

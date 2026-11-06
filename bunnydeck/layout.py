@@ -1,11 +1,13 @@
-"""Arranges terminal panels in a tree of nested QSplitters.
+"""Arranges panels (terminals, Docker panels) in a tree of nested QSplitters.
 
 The root splitter holds panels and/or child splitters; every child splitter
 runs across its parent's direction, so any mix of rows and columns can be
-built. Panels are only ever moved directly from one splitter into another
-(QSplitter.insertWidget re-parents in place): they are never made top-level,
-re-created or restarted. Window resizes are handled by QSplitter, which keeps
-the existing size proportions.
+built. Panels are only ever moved: from one splitter into another
+(QSplitter.insertWidget re-parents in place), or, when the user detaches
+one, out of the layout into a window of its own and back (detach.py,
+MainWindow.detach_panel / attach_panel). They are never re-created or
+restarted; a detached panel is not in `panels` while it is away. Window
+resizes are handled by QSplitter, which keeps the existing size proportions.
 """
 
 from PyQt6 import sip

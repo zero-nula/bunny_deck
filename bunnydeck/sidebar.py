@@ -17,6 +17,9 @@ ROLE_TARGET = Qt.ItemDataRole.UserRole + 1
 ROLE_COLOR = Qt.ItemDataRole.UserRole + 2
 ROLE_OPEN = Qt.ItemDataRole.UserRole + 3
 ROLE_ENDED = Qt.ItemDataRole.UserRole + 4  # open terminals whose session ended
+# The connection's DockerInfo (config.py) when it has Docker, else None.
+ROLE_DOCKER = Qt.ItemDataRole.UserRole + 5
+DOCKER_DIM = "#5f6773"
 
 ENDED = "#e5534b"
 
@@ -66,6 +69,10 @@ class _ConnectionDelegate(QStyledItemDelegate):
             p.drawText(badge, Qt.AlignmentFlag.AlignCenter, text)
             right = badge.left() - 6
 
+        info = index.data(ROLE_DOCKER)
+        if info is not None:
+            right = self._paint_docker(p, option, r, right, info)
+
         x = r.left() + 28
         width = right - x
         f = QFont(option.font)
@@ -87,6 +94,26 @@ class _ConnectionDelegate(QStyledItemDelegate):
                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, target)
         p.restore()
 
+    def _paint_docker(self, p, option, r, right, info):
+        """A whale and the number of running containers, left of the badge;
+        a grey whale alone when Docker is there but cannot be used."""
+        colour = theme.ACCENT if info.usable else DOCKER_DIM
+        if info.usable:
+            f = QFont(option.font)
+            f.setPixelSize(11)
+            f.setBold(True)
+            p.setFont(f)
+            text = str(info.running)
+            w = p.fontMetrics().horizontalAdvance(text)
+            p.setPen(QColor(colour))
+            p.drawText(QRectF(right - w, r.top(), w, r.height()),
+                       Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight, text)
+            right -= w + 3
+        size = 16
+        p.drawPixmap(int(right - size), int(r.center().y() - size / 2),
+                     icons.pixmap("docker", colour, size, p.device().devicePixelRatioF()))
+        return right - size - 6
+
 
 class ConnectionSidebar(QWidget):
     """openRequested(id) opens a terminal (LOCAL_ID: a local shell);
@@ -95,6 +122,8 @@ class ConnectionSidebar(QWidget):
 
     openRequested = pyqtSignal(str)
     reconnectRequested = pyqtSignal(str)
+    dockerRequested = pyqtSignal(str)
+    firewallRequested = pyqtSignal(str)
     keySetupRequested = pyqtSignal(str)
     removeRequested = pyqtSignal(str)
     addRequested = pyqtSignal()
@@ -169,10 +198,13 @@ class ConnectionSidebar(QWidget):
         self.no_match.hide()
 
     def set_connections(self, profiles, open_counts, local_color, local_open,
-                        ended_counts=None):
+                        ended_counts=None, docker=None):
         """profiles: saved Profiles; open_counts: {profile id: open terminals};
         ended_counts: {profile id (LOCAL_ID too): of those, disconnected}."""
         ended_counts = ended_counts or {}
+        # {profile id: DockerInfo} of connections that have Docker; the
+        # running counts of open Docker panels are fresher than the profile's.
+        docker = docker or {}
         current = self.list.currentItem().data(ROLE_ID) if self.list.currentItem() else None
         self.list.clear()
         rows = [(LOCAL_ID, "Local terminal", "this computer", local_color, local_open)]
@@ -187,9 +219,14 @@ class ConnectionSidebar(QWidget):
             item.setData(ROLE_OPEN, n)
             ended = ended_counts.get(pid, 0)
             item.setData(ROLE_ENDED, ended)
-            item.setToolTip(f"{name} — {target}" + (f"\n{n} open" if n else "")
-                            + (f", {ended} disconnected (right-click → Reconnect)"
-                               if ended else ""))
+            info = docker.get(pid)
+            item.setData(ROLE_DOCKER, info)
+            tip = f"{name} — {target}" + (f"\n{n} open" if n else "") \
+                + (f", {ended} disconnected (right-click → Reconnect)" if ended else "")
+            if info is not None:
+                tip += (f"\nDocker: {info.running} running (right-click → Docker…)"
+                        if info.usable else f"\nDocker: {info.message}")
+            item.setToolTip(tip)
             self.list.addItem(item)
             if pid == current:
                 self.list.setCurrentItem(item)
@@ -237,7 +274,12 @@ class ConnectionSidebar(QWidget):
                 ("Restart shell…" if local else "Reconnect…")
             menu.addAction(icons.icon("refresh"), text).triggered.connect(
                 lambda: self.reconnectRequested.emit(pid))
+        if item.data(ROLE_DOCKER) is not None:
+            menu.addAction(icons.icon("docker"), "Docker…").triggered.connect(
+                lambda: self.dockerRequested.emit(pid))
         if pid != LOCAL_ID:
+            menu.addAction(icons.icon("shield"), "Firewall…").triggered.connect(
+                lambda: self.firewallRequested.emit(pid))
             menu.addAction("Set up key login…").triggered.connect(
                 lambda: self.keySetupRequested.emit(pid))
             menu.addSeparator()

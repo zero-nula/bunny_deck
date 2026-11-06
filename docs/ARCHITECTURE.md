@@ -32,7 +32,14 @@ bunnydeck/aimenu.py        the AI menu's rows (QWidgetActions: initial tile, com
 bunnydeck/welcome.py       start screen: main actions and recent connections
 bunnydeck/theme.py         shared colours; a connection's accent colour from its background
 bunnydeck/icons.py         toolbar and header icons drawn with QPainter
+bunnydeck/panelbase.py     what every panel shares: header, Move, Detach, close, dragging, active line
+bunnydeck/detach.py        a detached panel's own window, and where to put it back
 bunnydeck/terminal.py      terminal panel: header + QTermWidget, starts ssh or a shell
+bunnydeck/remote.py        running a script over a server's shared connection once it is up
+bunnydeck/firewall.py      ufw: input checks, commands, server info, reading `ufw status numbered`
+bunnydeck/firewalldialog.py  the firewall window of a server
+bunnydeck/docker.py        Docker on SSH servers: the check, docker ps parsing, shell/logs commands
+bunnydeck/dockerpanel.py   the Docker panel: containers by compose project, in the layout
 bunnydeck/colorschemes.py  per-profile colours as generated QTermWidget colour schemes
 bunnydeck/background.py    background images composed to the terminal's size
 bunnydeck/dialogs.py       Add SSH, Add AI tool, Background and credential dialogs
@@ -133,6 +140,49 @@ The sidebar gets the number of ended terminals per connection
 (`sessionEnded` refreshes it) and paints the badge red; its Reconnect entry
 reconnects the ended terminals of that connection, or, if none has ended,
 asks and then replaces the running ones (`reconnect(force=True)`).
+
+### Detach and attach
+
+`MainWindow.detach_panel` takes a panel out of the layout. It first records
+its place with `detach.place_of(describe(), …)`:
+
+- after its previous sibling (right of / below it),
+- else before its next sibling (left of / above it),
+- where a sibling that is a whole subtree counts as its first panel.
+
+It then moves the panel into a `DetachedWindow`, by `setParent` through that
+window's layout. That is the same kind of move QSplitter makes between
+splitters, so the QTermWidget and its process just keep running. The window
+is translucent like the main one and titled after the panel. Its position is
+left to the window manager, because Wayland lets applications neither place
+windows nor drag them back.
+
+`attach_panel` puts the panel back:
+
+- next to its recorded neighbour, if that is still in the layout;
+- else right of a terminal of the same connection;
+- else at the end.
+
+While away, a panel is not in `SplitLayout.panels`. It is in
+`MainWindow.detached`, and `all_panels()`, `ordered_all()` and `terminals()`
+include it. Everything about open panels uses these: broadcast, the sidebar
+counts and Reconnect, the AI menu counts, the file manager's sources, the
+Docker panel and Firewall terminal lookups, quitting. Only what arranges the
+layout uses the layout itself: snap, Move, dragging, Alt+arrows.
+
+In its window the header shows **Attach**, always visible. Move is hidden
+and dragging does nothing. The terminal's shortcuts work unchanged, because
+they are caught on its `TerminalDisplay`. Reconnect builds the new terminal
+inside the same window. The window's X asks Attach back / Close session /
+Cancel (`detach.ask_close`). Quitting closes all detached windows. The
+session adds detached panels at the end of the root splitter
+(`session_tree`), so the next start has them in the layout.
+
+Moving a panel into another splitter or window re-polishes it with the
+style sheet, which resets the terminal's font to the default size. The
+terminal watches its display's `FontChange` and sets its own (zoomed) font
+again (`after_reparent`). Before this, a zoomed terminal also lost its zoom
+when it was moved in the layout.
 
 ### Root badge and latency
 
@@ -342,6 +392,111 @@ its Add SSH dialog with those values.
 The tests use `tests/fake_nmap.py`, a stand-in that prints canned XML for a
 test network, so no packets are sent.
 
+## Docker
+
+**Panels.** The layout holds `BasePanel`s (`panelbase.py`). That class owns
+the header: the dot, the name, Move and close, dragging with the "grabbed"
+look, the line over the active panel, and the tools that fade in.
+`TerminalPanel` and `DockerPanel` build on it, so snap layouts, the Move menu
+and dragging treat both alike. The window checks `panel.is_terminal` where
+only terminals make sense. That covers broadcast, Reconnect, the sidebar's
+open/disconnected counts and the AI menu counts (`MainWindow.terminals()`).
+
+**The check** (`docker.Probe`) starts when an SSH terminal starts (a real
+login, not a container shell). It first asks the master whether it is up
+(`ssh -O check`, retried after 2, 5, 10, 30 and 60 s, while a password may
+still be typed). Only then does it run `PROBE_SCRIPT` over it (`ControlMaster=no`,
+`BatchMode=yes`). The script runs `command -v docker` and then
+`docker info --format '{{.ContainersRunning}}'`. So it never logs in on its
+own and never asks for anything. `parse_probe` turns the output into a
+`DockerInfo` (`config.py`: `has_docker`, `running`, `checked`, `error`,
+`message`). Errors are classified as `denied` (not in the docker group, with
+the fix), `daemon` (not running) or `other`. A saved profile stores it in
+`config.json` (written atomically like everything else), so the sidebar's
+whale is there at the next start before any connection. Older config files
+without it mean "not checked yet".
+
+**The panel** (`DockerPanel`) runs `WATCH_SCRIPT` with `docker.Watch` while it
+is visible. That is one `ssh` over the shared connection, looping
+`docker ps -a --format '{{json .}}'` every 3 s. `showEvent` and `hideEvent`
+start and stop it, so the file manager view or closing the panel ends the
+loop on the server. A connection that is not up yet shows "Waiting for the
+SSH connection…" and is retried every 3 s.
+
+The parsing functions are pure:
+
+- `parse_ps` reads the JSON lines.
+- `parse_labels` reads docker's `k=v,k2=v2` labels, where a value may hold commas.
+- `parse_ports` turns `0.0.0.0:8080->80/tcp, :::8080->80/tcp` into `8080→80`.
+- `Container.level` gives the dot colour.
+- `group_by_project` groups by the `com.docker.compose.project` labels, with
+  `com.docker.compose.project.working_dir` as the tooltip.
+
+The tree is rebuilt only when the data changed, and keeps its selection,
+collapsed projects and scroll position.
+
+**Shells and logs** are ordinary `TerminalPanel`s with a `remote_command`:
+`ssh … -t -- host '<command>'` over the shared connection, placed below the
+Docker panel. The commands come from `docker.exec_command`, `logs_command`
+and `compose_logs_command`. Every container or project name goes through
+`shlex.quote`. Reconnect runs the same command again. They are not saved in
+the session; the Docker panel of a saved connection is
+(`{"kind": "docker", "profile": id}`) and is restored in place without
+opening a terminal of its own.
+
+`MainWindow.open_docker(profile)` is the one way in. It is used by the
+sidebar and terminal menus now, and by a header button or a sidebar section
+later.
+
+## Firewall (ufw)
+
+**What needs root and what does not.** Without root the window can read:
+
+- whether ufw is installed (`/usr/sbin/ufw`),
+- whether it is enabled (`ENABLED=` in `/etc/ufw/ufw.conf`, mode 0644),
+- the server's network (`ip -o -4 route show default`, `ip -o -4 addr show`;
+  `firewall.lan_from` takes the network of the interface with the default
+  route).
+
+`firewall.info_script()` reads these with `remote.RemoteScript`, the same
+"wait for the master, then run once over it" as the Docker check, so there is
+no extra login. The rules themselves need root: `ufw status` refuses, and
+`/etc/ufw/user*.rules` are mode 0640.
+
+**sudo in a terminal.** `MainWindow.open_firewall(profile, port=None)` opens
+the window and, below the server's terminal, a **Firewall terminal**. That is
+a login shell over the shared connection (`remote_command`,
+`firewall.SHELL_COMMAND`), and it stays open. Every sudo command is typed into
+it with `sendText`. The user sees it and enters the sudo password there.
+Bunny Deck never reads a password: there is no `sudo -S` and no `NOPASSWD`.
+sudo's timestamp is per terminal, so one password covers the following
+commands for a while.
+
+**Reading the status back.** Each command is followed by
+`printf '@@%s\n' ufw-status; sudo ufw status numbered; printf '@@%s\n' ufw-done`.
+The typed line holds `@@%s` and the word apart, so only the output contains
+the whole markers `@@ufw-status` and `@@ufw-done`. `firewall.StatusReader`
+collects that terminal's `receivedData`, strips colour codes, and parses
+what is between the markers (`parse_status`: active, rules, or a sudo/ufw
+error) for the window.
+
+**Delete** sends `sudo ufw delete N` without `--force`. ufw prints the rule
+and asks `(y|n)` in the terminal, so a rule whose number has moved is never
+deleted unseen.
+
+**Input** is checked before it reaches a command, and every value is also
+passed through `shlex.quote`:
+
+- `parse_port`: 1–65535, a range low:high.
+- `parse_source`: `ipaddress`; a network is reduced to its start.
+- `parse_comment`: letters, digits, space and `._:/@()+,-`, at most 64
+  characters.
+
+ufw needs a protocol for a port range, so "TCP and UDP" with a range gives
+one command per protocol. The window never runs `ufw enable`, because it can
+cut off SSH; it explains how instead. `open_firewall(profile, port)` also
+fills in the port, for a later "Allow in firewall…" on a container's port.
+
 ## File manager and SFTP
 
 - The file manager opens one SFTP channel per profile (over the shared
@@ -452,5 +607,8 @@ suite on openSUSE Tumbleweed, Fedora, Arch Linux, Debian and Ubuntu.
 | Password / passphrase / host-key dialogs | ✓ real OpenSSH + throwaway local `sshd` | ✓ wrong → retry warning → right, cancel | Password auth on a real server |
 | Local↔Remote, Remote↔Remote copies, drag and drop | ✓ | ✓ (drops simulated at the widget level) | Real drag from a file manager |
 | Backgrounds: preview, save, persist, reset, images, per-pixel alpha | ✓ | ✓ | Desktop visibly showing through |
+| Detach / attach | | ✓ same PID and widget, scrollback, font, colours, columns × lines, shortcuts, way back, X, session, quit | Detached window on a second screen under KDE Wayland |
+| Firewall: info, allow, rules, delete | ✓ ports, addresses, comments, command injection attempts, `ufw status numbered`, markers | ✓ fake `ssh`, `sudo` and `ufw` (rules in a temp file), (y|n) answered in the terminal | A real ufw, a real sudo password |
+| Docker: check, panel, shells and logs | ✓ `docker ps` JSON, labels, ports, groups, errors, quoting | ✓ fake `ssh` that runs commands here and fake `docker` | A real Docker server, `docker exec` into real containers |
 | Root badge, ping latency, stats popup | ✓ prompt recognition, stats parsing | ✓ local shell with a root prompt, fake `ping` and `ssh -G`, the stats script run locally | Real servers, `sudo -i` |
 | Menu entry, icon, window association | `desktop-file-validate` | ✓ X11 `WM_CLASS`, `_KDE_NET_WM_DESKTOP_FILE` | Pinning to a task bar |

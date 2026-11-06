@@ -16,7 +16,7 @@ from PyQt6.QtWidgets import (
     QStackedWidget, QToolButton, QVBoxLayout, QWidget,
 )
 
-from . import aimenu, colorschemes, icons, keysetup, snap, theme, mainthread, session, shortcuts, sshconfig, sshmux
+from . import aimenu, colorschemes, docker, firewall, icons, remote, keysetup, snap, theme, mainthread, session, shortcuts, sshconfig, sshmux
 from .config import (
     KIND_LOCAL, Config, Profile, store_background, validate_host, validate_user,
 )
@@ -27,6 +27,9 @@ from .dialogs import (
 from .layout import (
     ABOVE, BELOW, HORIZONTAL_SPLIT, LEFT, RIGHT, SWAP, VERTICAL_SPLIT, SplitLayout,
 )
+from .detach import DetachedWindow, ask_close, place_of
+from .dockerpanel import DockerPanel
+from .firewalldialog import FirewallDialog
 from .sidebar import LOCAL_ID, ConnectionSidebar
 from .terminal import TerminalPanel, local_shell, terminal_font
 from .welcome import WelcomeScreen
@@ -55,6 +58,13 @@ class MainWindow(QMainWindow):
         self.broadcasting = False
         # Likewise one unsaved local profile per AI tool (keyed by tool id).
         self.ai_profiles = {}
+        self._docker_probes = {}  # profile id -> docker.Probe
+        # Firewall, per profile id: the window, its terminal, its info check.
+        self._firewalls = {}
+        self._fw_terminals = {}
+        self._fw_checks = {}
+        # Panels in a window of their own: panel -> DetachedWindow (detach.py).
+        self.detached = {}
         self.setWindowTitle(APP_NAME)
         self.setObjectName("mainWindow")
         # Translucent window: a terminal's background alpha reveals what is
@@ -81,6 +91,10 @@ class MainWindow(QMainWindow):
         self.sidebar = ConnectionSidebar()
         self.sidebar.openRequested.connect(self._on_sidebar_open)
         self.sidebar.reconnectRequested.connect(self._on_sidebar_reconnect)
+        self.sidebar.firewallRequested.connect(
+            lambda pid: self.config.get(pid) and self.open_firewall(self.config.get(pid)))
+        self.sidebar.dockerRequested.connect(
+            lambda pid: self.config.get(pid) and self.open_docker(self.config.get(pid)))
         self.sidebar.keySetupRequested.connect(self._on_key_setup)
         self.sidebar.removeRequested.connect(self._on_saved_remove)
         self.sidebar.addRequested.connect(lambda: self.add_ssh())
@@ -108,16 +122,19 @@ class MainWindow(QMainWindow):
             return
         counts, ended = {}, {}
         local_open = 0
-        for p in self.layout_.panels:
+        for p in self.terminals():
             key = LOCAL_ID if p.profile is self.local_profile else p.profile.id
             if p.profile is self.local_profile:
                 local_open += 1
             counts[p.profile.id] = counts.get(p.profile.id, 0) + 1
-            if p.ended and not p.running:
+            # A container shell or logs ending is no lost connection.
+            if p.ended and not p.running and p.remote_command is None:
                 ended[key] = ended.get(key, 0) + 1
+        docker_info = {p.id: p.docker for p in self.config.profiles
+                       if not p.is_local and p.docker.has_docker is True}
         self.sidebar.set_connections(self.config.profiles, counts,
                                      theme.accent_for(self.local_profile.appearance), local_open,
-                                     ended)
+                                     ended, docker_info)
         self.empty.set_recent(self.config.recent_profiles())
 
     def _on_sidebar_open(self, profile_id):
@@ -130,8 +147,8 @@ class MainWindow(QMainWindow):
         """Reconnects the connection's disconnected terminals; if none has
         disconnected (e.g. a frozen session), ends and reopens the running
         ones after asking."""
-        panels = [p for p in self.layout_.ordered_panels()
-                  if (p.profile is self.local_profile if profile_id == LOCAL_ID
+        panels = [p for p in self.ordered_all() if p.is_terminal
+                  and (p.profile is self.local_profile if profile_id == LOCAL_ID
                       else p.profile.id == profile_id)]
         ended = [p for p in panels if p.ended and not p.running]
         if ended:
@@ -459,7 +476,7 @@ class MainWindow(QMainWindow):
         tools = sorted(self.config.ai_tools, key=lambda t: t.name.lower())
         counts = {}
         for tool_id, profile in self.ai_profiles.items():
-            counts[tool_id] = sum(1 for p in self.layout_.panels if p.profile is profile)
+            counts[tool_id] = sum(1 for p in self.all_panels() if p.profile is profile)
         aimenu.fill(self.ai_menu, tools, counts, self.open_ai, self.add_ai_tool,
                     self._on_ai_remove)
         self.ai_menu.setToolTipsVisible(True)
@@ -496,10 +513,33 @@ class MainWindow(QMainWindow):
         argv = [shell, "-ic", f"{tool.command}; exec {shlex.quote(shell)}"]
         return self.open_profile(profile, argv=argv)
 
-    def _new_panel(self, profile, argv=None, appearance=None):
-        """A terminal wired to the window, not yet placed or started."""
-        panel = TerminalPanel(profile, argv=argv, appearance=appearance)
+    def all_panels(self):
+        """Every open panel: in the layout and detached into their own windows."""
+        return self.layout_.panels + list(self.detached)
+
+    def ordered_all(self):
+        """All panels, the layout's in visual order first, then detached ones."""
+        return self.layout_.ordered_panels() + list(self.detached)
+
+    def terminals(self):
+        """The terminal panels (there may also be Docker panels), detached ones too."""
+        return [p for p in self.all_panels() if p.is_terminal]
+
+    def _wire_panel(self, panel):
+        """What every panel in the layout does with the window."""
         panel.closeRequested.connect(self._on_close_requested)
+        panel.focused.connect(self._on_panel_focused)
+        panel.moveMenuRequested.connect(self._fill_move_menu)
+        panel.snapRequested.connect(lambda p: self.show_snap(p, p.move_btn))
+        panel.headerDragged.connect(self._on_header_drag)
+        panel.detachRequested.connect(self.detach_panel)
+        panel.attachRequested.connect(self.attach_panel)
+
+    def _new_panel(self, profile, argv=None, appearance=None, remote_command=None, title=None):
+        """A terminal wired to the window, not yet placed or started."""
+        panel = TerminalPanel(profile, argv=argv, appearance=appearance,
+                              remote_command=remote_command, title=title)
+        self._wire_panel(panel)
         panel.appearanceRequested.connect(self._on_appearance_requested)
         panel.keySetupRequested.connect(lambda p: self.setup_key_login(p.profile))
         panel.broadcastToggleRequested.connect(self.broadcast_btn.toggle)
@@ -509,20 +549,25 @@ class MainWindow(QMainWindow):
         if self.broadcasting:
             panel.set_broadcast_mode(True, include=False)
         panel.scpRequested.connect(self.open_file_manager)
-        panel.focused.connect(self._on_panel_focused)
-        panel.moveMenuRequested.connect(self._fill_move_menu)
-        panel.snapRequested.connect(lambda p: self.show_snap(p, p.move_btn))
-        panel.headerDragged.connect(self._on_header_drag)
         panel.reconnectRequested.connect(self.reconnect)
         panel.sessionEnded.connect(lambda _p: self.refresh_connections())
+        panel.dockerRequested.connect(lambda p: self.open_docker(p.profile))
+        panel.firewallRequested.connect(lambda p: self.open_firewall(p.profile))
+        panel.has_docker = lambda p=panel: p.profile.docker.has_docker is True
         return panel
 
-    def open_profile(self, profile, argv=None):
-        panel = self._new_panel(profile, argv)
+    def open_profile(self, profile, argv=None, remote_command=None, title=None, beside=None):
+        """Opens a terminal. remote_command/title: a command instead of the
+        login shell (docker exec, logs); beside=(panel, side) places it next
+        to that panel."""
+        panel = self._new_panel(profile, argv, remote_command=remote_command, title=title)
         # In a custom arrangement, open next to the active terminal instead of
         # flattening the layout; with a preset, keep the uniform row/column.
-        near = self.active_panel if self.layout_.custom else None
+        near = beside[0] if beside else (self.active_panel if self.layout_.custom else None)
         self.layout_.add_panel(panel, near=near)
+        if beside:
+            self.layout_.move_panel(panel, beside[0], beside[1])
+            self._clear_presets()
         if self.config.get(profile.id) is not None:
             self.config.mark_used(profile.id)
         self.refresh_connections()
@@ -532,7 +577,153 @@ class MainWindow(QMainWindow):
         panel.spawn()
         panel.focus_terminal()
         self._on_panel_focused(panel)
+        if panel.measure_latency and remote_command is None:
+            self.probe_docker(profile)  # a real SSH login: does the server have Docker?
         return panel
+
+    # ----- Docker ---------------------------------------------------------
+
+    def probe_docker(self, profile):
+        """Checks in the background (once the SSH connection is up) whether
+        the server has Docker; the result is kept with a saved profile."""
+        probe = self._docker_probes.get(profile.id)
+        if probe is not None and not probe.finished:
+            return probe
+        probe = docker.Probe(profile.ssh_args(), parent=self)
+        probe.done.connect(lambda info, p=profile: self._docker_checked(p, info))
+        self._docker_probes[profile.id] = probe
+        probe.start()
+        return probe
+
+    def _docker_checked(self, profile, info):
+        profile.docker = info
+        if self.config.get(profile.id) is not None:
+            self.config.set_docker(profile.id, info)
+        self.refresh_connections()
+
+    def docker_panel_for(self, profile):
+        return next((p for p in self.all_panels()
+                     if isinstance(p, DockerPanel) and p.profile.id == profile.id), None)
+
+    def open_docker(self, profile, place=True):
+        """The Docker panel of a connection, right of its terminal (opening
+        one first: it makes the shared connection the panel uses). The one
+        way in, for the menus now and a header button / sidebar section
+        later. place=False: just add it (a restored session arranges it)."""
+        existing = self.docker_panel_for(profile)
+        if existing is not None:
+            self.show_terminals()
+            self._focus_panel(existing)
+            return existing
+        ref = None
+        if place:
+            mine = [p for p in self.ordered_all()
+                    if p.is_terminal and p.profile.id == profile.id]
+            ref = next((p for p in mine if p.remote_command is None), None) or \
+                (mine[0] if mine else None) or self.open_profile(profile)
+        panel = DockerPanel(profile, self.docker_argv_for(profile))
+        self._wire_panel(panel)
+        panel.shellRequested.connect(
+            lambda p, name: self._container_terminal(p, docker.exec_command(name), f"🐳 {name}"))
+        panel.logsRequested.connect(
+            lambda p, name: self._container_terminal(p, docker.logs_command(name),
+                                                     f"Logs: {name}"))
+        panel.projectLogsRequested.connect(
+            lambda p, project: self._container_terminal(
+                p, docker.compose_logs_command(project), f"Logs: {project}"))
+        panel.runningChanged.connect(self._on_docker_running)
+        self.layout_.add_panel(panel, near=ref)
+        if ref is not None:
+            self.layout_.move_panel(panel, ref, RIGHT)
+            self._clear_presets()
+        self.show_terminals()
+        self._focus_panel(panel)
+        return panel
+
+    # ----- firewall (ufw) ------------------------------------------------
+
+    def open_firewall(self, profile, port=None):
+        """The firewall window of a server, port filled in if given (e.g.
+        from a container's port later). Its sudo commands run in the
+        server's Firewall terminal, opened below the server's terminal."""
+        dlg = self._firewalls.get(profile.id)
+        if dlg is None:
+            dlg = FirewallDialog(profile, self)
+            dlg.runRequested.connect(lambda cmd, p=profile: self._firewall_run(p, cmd))
+            dlg.finished.connect(lambda _r, pid=profile.id: self._firewall_closed(pid))
+            self._firewalls[profile.id] = dlg
+            self._firewall_terminal(profile)
+            check = remote.RemoteScript(profile.ssh_args(), firewall.info_script(),
+                                        parse=firewall.parse_info, parent=self)
+            check.output.connect(dlg.show_info)
+            check.gave_up.connect(dlg.show_unreachable)
+            self._fw_checks[profile.id] = check
+            check.start()
+            self._firewall_run(profile, firewall.STATUS_COMMAND, focus=False)
+        dlg.set_port(port)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
+
+    def _firewall_closed(self, profile_id):
+        self._firewalls.pop(profile_id, None)
+        check = self._fw_checks.pop(profile_id, None)
+        if check is not None:
+            check.stop()
+
+    def _firewall_terminal(self, profile):
+        """The server's Firewall terminal: a login shell over the shared
+        connection, below the server's terminal (opening that first if
+        needed: it makes the connection)."""
+        panel = self._fw_terminals.get(profile.id)
+        if panel is not None and panel in self.all_panels() and panel.running:
+            return panel
+        if panel is not None and panel in self.all_panels():
+            self.close_panel(panel)  # ended: a new one takes over
+        mine = [p for p in self.ordered_all()
+                if p.is_terminal and p.profile.id == profile.id and p.remote_command is None]
+        ref = mine[0] if mine else self.open_profile(profile)
+        panel = self.open_profile(profile, remote_command=firewall.SHELL_COMMAND,
+                                  title=f"Firewall: {profile.name}", beside=(ref, BELOW))
+        reader = firewall.StatusReader()
+        panel.terminal.receivedData.connect(
+            lambda text, r=reader, pid=profile.id: self._firewall_output(pid, r, text))
+        self._fw_terminals[profile.id] = panel
+        return panel
+
+    def _firewall_output(self, profile_id, reader, text):
+        status = reader.feed(text)
+        dlg = self._firewalls.get(profile_id)
+        if status is not None and dlg is not None:
+            dlg.show_status(status)
+
+    def _firewall_run(self, profile, command, focus=True):
+        """Types a command into the Firewall terminal (the user sees it and
+        enters the sudo password there)."""
+        panel = self._firewall_terminal(profile)
+        panel.terminal.sendText(command + "\n")
+        if focus:
+            self.show_terminals()
+            self._focus_panel(panel)
+        return panel
+
+    def docker_argv_for(self, profile):
+        """How a Docker panel runs its script (tests replace this)."""
+        return lambda script: docker.ssh_argv(profile.ssh_args(), script)
+
+    def _container_terminal(self, docker_panel, command, title):
+        """A shell or logs of a container: a terminal below the Docker panel."""
+        return self.open_profile(docker_panel.profile, remote_command=command, title=title,
+                                 beside=(docker_panel, BELOW))
+
+    def _on_docker_running(self, panel, n):
+        info = panel.profile.docker
+        if info.has_docker is True and not info.error and info.running != n:
+            info.running = n
+            if self.config.get(panel.profile.id) is not None:
+                self.config.set_docker(panel.profile.id, info)
+            self.refresh_connections()
 
     # ----- keyboard shortcuts ---------------------------------------------
 
@@ -567,7 +758,7 @@ class MainWindow(QMainWindow):
                     self.active_panel.focus_terminal()
             else:
                 self.open_file_manager(panel)
-        elif self.current_view() != "terminals" or panel is None:
+        elif panel is None or (self.current_view() != "terminals" and not panel.detached):
             return  # the rest acts on terminals, which are not shown
         elif action == "close":
             self._on_close_requested(panel)
@@ -583,6 +774,10 @@ class MainWindow(QMainWindow):
             panel.zoom({"zoom-in": 1, "zoom-out": -1, "zoom-reset": 0}[action])
 
     def _focus_panel(self, panel):
+        win = self.detached.get(panel)
+        if win is not None:
+            win.raise_()
+            win.activateWindow()
         panel.focus_terminal()
         self._on_panel_focused(panel)
 
@@ -632,23 +827,29 @@ class MainWindow(QMainWindow):
         self.broadcasting = on
         if self.broadcast_btn.isChecked() != on:
             self.broadcast_btn.setChecked(on)
-        for p in self.layout_.panels:
+        for p in self.all_panels():
             p.set_broadcast_mode(on, include=False)
         self._update_broadcast_button()
 
     def _broadcast_peers(self, panel):
         if not self.broadcasting or not panel.broadcast:
             return []
-        return [p for p in self.layout_.panels if p is not panel and p.broadcast]
+        return [p for p in self.all_panels() if p is not panel and p.broadcast]
 
     def _update_broadcast_button(self, *_):
-        n = sum(1 for p in self.layout_.panels if p.broadcast) if self.broadcasting else 0
+        n = sum(1 for p in self.all_panels() if p.broadcast) if self.broadcasting else 0
         # The count of ticked terminals sits next to the icon while it is on.
         self.broadcast_btn.setText(str(n) if self.broadcasting else "")
 
     def close_panel(self, panel):
         panel.set_broadcast(False)
         panel.terminate()
+        win = self.detached.pop(panel, None)
+        if win is not None:
+            win.take_panel()
+            win.closing = True
+            win.close()
+            win.deleteLater()
         self.layout_.remove_panel(panel)
         panel.deleteLater()
         self.refresh_connections()
@@ -664,9 +865,10 @@ class MainWindow(QMainWindow):
         """Starts an ended session again: a new terminal in the old one's
         place, with its background, font size and broadcast tick. force: also
         a running one (it is ended first)."""
-        if (old.running and not force) or old not in self.layout_.panels:
+        if (old.running and not force) or old not in self.all_panels():
             return None
-        panel = self._new_panel(old.profile, old.argv_given, old.appearance)
+        panel = self._new_panel(old.profile, old.argv_given, old.appearance,
+                                old.remote_command, old.title)
         if self.broadcasting:
             panel.set_broadcast_mode(True, include=old.broadcast)
         if old.font_size != panel.font_size:
@@ -675,7 +877,17 @@ class MainWindow(QMainWindow):
         was_active = self.active_panel is old
         old.set_broadcast(False)
         old.terminate()
-        self.layout_.replace_panel(old, panel)
+        win = self.detached.pop(old, None)
+        if win is not None:
+            # Reconnected in its own window: the new terminal takes its place there.
+            win.take_panel()
+            win.layout().addWidget(panel)
+            win.panel = panel
+            panel.set_detached(True)
+            self.detached[panel] = win
+            win.update_title()
+        else:
+            self.layout_.replace_panel(old, panel)
         old.deleteLater()
         if was_active:
             self.active_panel = None
@@ -706,7 +918,7 @@ class MainWindow(QMainWindow):
         panel.set_active(True)
 
     def panels_for_profile(self, profile_id):
-        return [p for p in self.layout_.panels if p.profile.id == profile_id]
+        return [p for p in self.all_panels() if p.profile.id == profile_id]
 
     def _appearance_saver(self, profile):
         """How to persist this profile's appearance, or None if it is not
@@ -825,7 +1037,9 @@ class MainWindow(QMainWindow):
 
     def show_snap(self, panel, anchor):
         """The snap layouts popup for panel (the active terminal if None)."""
-        panel = panel if panel in self.layout_.panels else self.active_panel
+        if panel not in self.layout_.panels:
+            # (a detached panel is not in the layout the popup arranges)
+            panel = self.active_panel if self.active_panel in self.layout_.panels else None
         if panel is None and self.layout_.panels:
             panel = self.layout_.panels[0]
         if panel is None:
@@ -889,7 +1103,7 @@ class MainWindow(QMainWindow):
         panel.focus_terminal()
 
     def closeEvent(self, event):
-        running = [p for p in self.layout_.panels if p.running]
+        running = [p for p in self.all_panels() if p.running]
         if running and not self._confirm(
             "Quit Bunny Deck?",
             f"{len(running)} session(s) are still running and will be terminated.",
@@ -912,8 +1126,15 @@ class MainWindow(QMainWindow):
 
     def shutdown(self):
         self.save_session()
-        for p in list(self.layout_.panels):
+        for probe in self._docker_probes.values():
+            probe.stop()
+        for check in self._fw_checks.values():
+            check.stop()
+        for p in list(self.all_panels()):
             p.terminate()
+        for win in list(self.detached.values()):
+            win.closing = True
+            win.close()
         if self.file_manager is not None:
             self.file_manager.shutdown()
         if self.network_scan is not None:
@@ -924,6 +1145,12 @@ class MainWindow(QMainWindow):
 
     def _session_entry(self, panel):
         profile = panel.profile
+        if isinstance(panel, DockerPanel):
+            # Saved connections only; restored without opening a terminal.
+            return ({"kind": "docker", "profile": profile.id}
+                    if self.config.get(profile.id) is not None else None)
+        if panel.remote_command is not None:
+            return None  # a container shell or logs: not started again on its own
         if profile is self.local_profile:
             return {"kind": "local"}
         for tool_id, p in self.ai_profiles.items():
@@ -947,6 +1174,9 @@ class MainWindow(QMainWindow):
         if kind == "ai":
             tool = next((t for t in self.config.ai_tools if t.id == entry.get("tool")), None)
             return self.open_ai(tool) if tool is not None else None
+        if kind == "docker":
+            profile = self.config.get(entry.get("profile"))
+            return self.open_docker(profile, place=False) if profile is not None else None
         if kind == "ssh" and "profile" in entry:
             profile = self.config.get(entry["profile"])
             return self.open_profile(profile) if profile is not None else None
@@ -963,9 +1193,78 @@ class MainWindow(QMainWindow):
                                              user=user, port=port))
         return None
 
+    def session_tree(self):
+        """The layout for the session, detached panels added at the end of
+        the root: the next start opens them in the layout."""
+        orientation, sizes, children = self.layout_.describe()
+        extra = list(self.detached)
+        if extra:
+            share = sum(sizes) // len(sizes) if sizes else 1000
+            sizes = list(sizes) + [share] * len(extra)
+            children = list(children) + extra
+        return (orientation, sizes, children)
+
+    # ----- detach / attach ------------------------------------------------
+
+    def detach_panel(self, panel):
+        """Moves a panel out of the layout into a window of its own. It is
+        only moved: the terminal and its process keep running."""
+        if panel.detached or panel not in self.layout_.panels:
+            return None
+        place = place_of(self.layout_.describe(), panel, self.layout_.panels)
+        size = panel.size()
+        panel.set_detached(True)  # before it moves: no fade may hide Attach
+        self.layout_.remove_panel(panel)
+        panel.resize(size)
+        win = DetachedWindow(panel, place, self.windowIcon())
+        win.closeAsked.connect(self._detached_close_asked)
+        panel.set_detached(True)  # (again: stops a fade the move started)
+        self.detached[panel] = win
+        win.show()
+        panel.after_reparent()
+        self._focus_panel(panel)
+        self._on_panel_focused(panel)
+        self._update_view()
+        return win
+
+    def attach_panel(self, panel):
+        """Back into the layout: where it was if that neighbour is still
+        there, else right of a terminal of the same connection, else last."""
+        win = self.detached.pop(panel, None)
+        if win is None:
+            return
+        win.take_panel()
+        win.closing = True
+        win.close()
+        win.deleteLater()
+        panel.set_detached(False)
+        ref, side = win.place if win.place else (None, None)
+        if ref not in self.layout_.panels:
+            same = [p for p in self.layout_.ordered_panels() if p.profile.id == panel.profile.id]
+            ref = next((p for p in same if p.is_terminal and p.remote_command is None),
+                       same[0] if same else None)
+            side = RIGHT
+        self.layout_.add_panel(panel, near=ref)
+        if ref is not None:
+            self.layout_.move_panel(panel, ref, side)
+            self._clear_presets()
+        self.show_terminals()
+        panel.after_reparent()
+        self.raise_()
+        self.activateWindow()
+        self._focus_panel(panel)
+        self._on_panel_focused(panel)
+
+    def _detached_close_asked(self, win):
+        choice = ask_close(win, win.panel)
+        if choice == "attach":
+            self.attach_panel(win.panel)
+        elif choice == "close":
+            self.close_panel(win.panel)
+
     def save_session(self):
         try:
-            session.save(session.encode(self.layout_.describe(), self._session_entry,
+            session.save(session.encode(self.session_tree(), self._session_entry,
                                         self.active_panel))
         except OSError as e:
             print(f"bunny-deck: could not save the session: {e}")

@@ -11,14 +11,15 @@ import re
 import signal
 import time
 
-from PyQt6.QtCore import QEvent, QObject, QPropertyAnimation, QSize, Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QEvent, QObject, QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QAction, QFont, QFontDatabase, QKeyEvent, QKeySequence
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QSizePolicy,
-    QToolButton, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QLabel, QMenu, QSizePolicy,
+    QToolButton, QVBoxLayout, QWidget, QWidgetAction,
 )
 
-from . import background, colorschemes, icons, latency, shortcuts, sshmux, stats, theme
+from . import background, colorschemes, icons, latency, shortcuts, sshmux, stats
+from .panelbase import BasePanel
 from .config import Appearance
 from .native import QTermWidget
 
@@ -96,12 +97,16 @@ def local_shell():
     return FALLBACK_SHELL
 
 
-def default_argv(profile):
+def default_argv(profile, remote_command=None):
     """Local profiles run the shell without arguments; SSH profiles run ssh,
-    sharing one connection per host (see sshmux.py)."""
+    sharing one connection per host (see sshmux.py). remote_command (SSH
+    only, already quoted for the remote shell) runs that instead of a login
+    shell, with a terminal (-t), e.g. `docker exec -it …`."""
     if profile.is_local:
         return [local_shell()]
-    return [SSH_BINARY] + sshmux.master_opts() + profile.ssh_args()
+    tty = ["-t"] if remote_command else []
+    return ([SSH_BINARY] + sshmux.master_opts() + tty + profile.ssh_args()
+            + ([remote_command] if remote_command else []))
 
 
 def _process_alive(pid):
@@ -164,10 +169,10 @@ class _TerminalKeys(QObject):
         return False
 
 
-class TerminalPanel(QWidget):
+class TerminalPanel(BasePanel):
     """One independent terminal session."""
 
-    closeRequested = pyqtSignal(object)
+    is_terminal = True
     scpRequested = pyqtSignal(object)
     appearanceRequested = pyqtSignal(object)
     keySetupRequested = pyqtSignal(object)
@@ -175,29 +180,29 @@ class TerminalPanel(QWidget):
     # (panel, action name from shortcuts.py) for the window's shortcuts
     shortcutRequested = pyqtSignal(object, str)
     broadcastChanged = pyqtSignal(object)
-    focused = pyqtSignal(object)
     # The session ended and the user wants it again (button, Enter, menu).
     reconnectRequested = pyqtSignal(object)
     sessionEnded = pyqtSignal(object)
-    # (panel, QMenu): the window fills the Move menu just before it opens.
-    moveMenuRequested = pyqtSignal(object, object)
-    # The Move button: the window shows the snap layouts for this panel.
-    snapRequested = pyqtSignal(object)
-    # Dragging by the header: (panel, global QPoint, "start" | "move" | "drop").
-    headerDragged = pyqtSignal(object, object, str)
+    # "Docker…" in the right-click menu (only when the server has Docker).
+    dockerRequested = pyqtSignal(object)
+    firewallRequested = pyqtSignal(object)
 
     _counter = 0
 
-    def __init__(self, profile, argv=None, appearance=None, parent=None):
-        super().__init__(parent)
+    def __init__(self, profile, argv=None, appearance=None, parent=None,
+                 remote_command=None, title=None):
+        super().__init__(profile, parent)
         TerminalPanel._counter += 1
         self.session_id = TerminalPanel._counter
-        self.profile = profile
-        self.argv = argv or default_argv(profile)
-        self.argv_given = argv  # what a reconnect passes on
+        self.argv = argv or default_argv(profile, remote_command)
+        # What a reconnect passes on.
+        self.argv_given = argv
+        self.remote_command = remote_command
+        self.title = title
         self.child_pid = None
-        self.running = False
-        self.ended = False  # the session ran and has ended (not: never started)
+        # ended: the session ran and has ended (not: never started).
+        # Set by the window: whether "Docker…" belongs in the menu.
+        self.has_docker = lambda: False
         self._bg_file = ""
         # Root: known from the profile at first, then from the prompt/title.
         self.is_root = False
@@ -206,13 +211,10 @@ class TerminalPanel(QWidget):
         # Latency only for real SSH sessions (not when argv is given, as in tests).
         self.measure_latency = argv is None and not profile.is_local
         self._latency = None
-        self.broadcast = False
         self.font_size = FONT_SIZE
         # Set by the window: the other terminals that receive what is typed
         # here while broadcasting (empty otherwise).
         self.broadcast_peers = lambda: []
-        self.setObjectName("termPanel")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(1, 1, 1, 1)
@@ -225,17 +227,8 @@ class TerminalPanel(QWidget):
     # ----- UI -------------------------------------------------------------
 
     def _build_header(self):
-        header = self.header = QWidget(self)
-        header.setObjectName("termHeader")
-        header.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        h = QHBoxLayout(header)
-        h.setContentsMargins(6, 0, 4, 0)
-        h.setSpacing(6)
-
-        self.status_dot = QLabel("●")
-        self.status_dot.setObjectName("statusDot")
-        self.name_label = QLabel(self.profile.name)
-        self.name_label.setObjectName("termName")
+        header = self._build_base_header(self.title or self.profile.name)
+        h = self.header_layout
         self.target_label = QLabel(self.profile.target)
         self.target_label.setObjectName("termTarget")
         self.status_label = QLabel("starting")
@@ -244,14 +237,12 @@ class TerminalPanel(QWidget):
         # name and status keep their natural width so they stay readable.
         self.target_label.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.target_label.setMinimumWidth(1)
-        for lbl in (self.name_label, self.status_label):
-            lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
 
         self.broadcast_box = QCheckBox(header)
         self.broadcast_box.setObjectName("broadcastBox")
         self.broadcast_box.setToolTip("Broadcast: what you type goes to every ticked terminal")
         self.broadcast_box.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        # The header shows a hand for dragging; things you click get a pointer.
         self.broadcast_box.setCursor(Qt.CursorShape.PointingHandCursor)
         self.broadcast_box.toggled.connect(self.set_broadcast)
         self.broadcast_box.hide()
@@ -287,41 +278,12 @@ class TerminalPanel(QWidget):
         self._stats_closed_at = 0.0
         h.addWidget(self.stats_btn)
         h.addWidget(self.status_label)
-        self._no_drag = (self.broadcast_box, self.status_dot, self.name_label,
-                         self.root_badge, self.target_label,
-                         self.status_label)
-        for w in self._no_drag:
-            if w is not self.broadcast_box:
-                w.setCursor(Qt.CursorShape.ArrowCursor)
-
-        def button(icon_name, text, tip, sig=None, name="hdrBtn"):
-            b = QToolButton(header)
-            b.setText(text)  # (the accessible name; only the icon shows)
-            b.setIcon(icons.icon(icon_name))
-            b.setIconSize(QSize(14, 14))
-            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
-            b.setToolTip(tip)
-            b.setObjectName(name)
-            b.setAutoRaise(True)
-            b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            if sig is not None:
-                b.clicked.connect(lambda: sig.emit(self))
-            h.addWidget(b)
-            return b
-
-        self.move_btn = button("move", "Move", "Snap layouts: choose where this terminal goes. "
-                               "You can also drag the terminal by its header.", self.snapRequested)
-        # The exact "left of / right of … another terminal" menu, offered in
-        # the snap popup.
-        self.move_menu = QMenu(self.move_btn)
-        self.move_menu.aboutToShow.connect(lambda: self.moveMenuRequested.emit(self, self.move_menu))
-        self._drag_start = None
-        self._dragging = False
+        self._add_move_button("terminal")
         # Shown when the session has ended: start it again in the same place.
         self.reconnect_btn = QToolButton(header)
         self.reconnect_btn.setObjectName("reconnectBtn")
-        self.reconnect_btn.setText("Restart" if self.profile.is_local else "Reconnect")
+        self.reconnect_btn.setText("Restart" if self.profile.is_local and not self.remote_command
+                                   else "Reconnect")
         self.reconnect_btn.setIcon(icons.icon("refresh", color="#ffffff"))
         self.reconnect_btn.setIconSize(QSize(12, 12))
         self.reconnect_btn.setFixedHeight(18)
@@ -334,22 +296,15 @@ class TerminalPanel(QWidget):
         self.reconnect_btn.clicked.connect(lambda: self.reconnectRequested.emit(self))
         self.reconnect_btn.hide()
         h.addWidget(self.reconnect_btn, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.appearance_btn = button("image", "Background", "Background: colour, opacity and "
-                                     "image of this terminal", self.appearanceRequested)
-        # Move and background show while the mouse is over the header
-        # (faded in, so the header never shifts); close is always there.
-        self.tools = (self.move_btn, self.appearance_btn)
-        self._hovered = False
-        self._tool_effects = []
-        for b in self.tools:
-            effect = QGraphicsOpacityEffect(b)
-            effect.setOpacity(0.0)
-            b.setGraphicsEffect(effect)
-            self._tool_effects.append(effect)
-        self.close_btn = button("close", "✕", "Close this session (Ctrl+Shift+W)",
-                                self.closeRequested, "hdrClose")
-        header.installEventFilter(self)
-        header.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.appearance_btn = self.header_button(
+            "image", "Background", "Background: colour, opacity and image of this terminal",
+            self.appearanceRequested)
+        h.addWidget(self.appearance_btn)
+        self._finish_header(
+            (self.move_btn, self.appearance_btn),
+            (self.broadcast_box, self.status_dot, self.name_label, self.root_badge,
+             self.target_label, self.status_label),
+            "Close this session (Ctrl+Shift+W)")
         return header
 
     def _build_terminal(self):
@@ -399,78 +354,19 @@ class TerminalPanel(QWidget):
         self.display.installEventFilter(self)
         return term
 
-    def _set_grabbed(self, on):
-        """Lights the terminal up while it is held by its header."""
-        if bool(self.property("grabbed")) == on:
-            return
-        self.setProperty("grabbed", on)
-        for w in (self, self.header, self.name_label):
-            w.style().unpolish(w)
-            w.style().polish(w)
-        if on:
-            if getattr(self, "_grab_tint", None) is None:
-                self._grab_tint = QWidget(self)
-                self._grab_tint.setObjectName("grabTint")
-                self._grab_tint.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-                self._grab_tint.setAttribute(
-                    Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            self._grab_tint.setGeometry(self.rect())
-            self._grab_tint.raise_()
-            self._grab_tint.show()
-        elif getattr(self, "_grab_tint", None) is not None:
-            self._grab_tint.hide()
-
     def eventFilter(self, obj, event):
-        if obj is self.header and event.type() in (QEvent.Type.Enter, QEvent.Type.Leave):
-            self._hovered = event.type() == QEvent.Type.Enter
-            self._show_tools(self._hovered)
-        elif obj is self.header and event.type() in (
-                QEvent.Type.MouseButtonPress, QEvent.Type.MouseMove,
-                QEvent.Type.MouseButtonRelease):
-            return self._header_drag(event)
-        elif (obj is getattr(self, "display", None) and event.type() == QEvent.Type.Resize
+        handled, result = self._header_event(obj, event)
+        if handled:
+            return result
+        if (obj is getattr(self, "display", None) and event.type() == QEvent.Type.Resize
                 and self.appearance.image):
             self._bg_timer.start()
+        elif (obj is getattr(self, "display", None) and event.type() == QEvent.Type.FontChange
+                and abs(obj.font().pointSizeF() - self.font_size) > 0.01):
+            # Moving the panel (another splitter or window) polishes it again
+            # with the style sheet, which resets the font: set ours again.
+            QTimer.singleShot(0, self.after_reparent)
         return False
-
-    def _header_drag(self, event):
-        """Press and drag the header to move the terminal (see headerDragged)."""
-        t = event.type()
-        gpos = event.globalPosition().toPoint()
-        if t == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-            if self.header.childAt(event.position().toPoint()) in self._no_drag:
-                return False
-            self._drag_start = gpos
-            self._set_grabbed(True)
-            return False
-        if t == QEvent.Type.MouseMove and self._drag_start is not None:
-            if not self._dragging:
-                if (gpos - self._drag_start).manhattanLength() < \
-                        QApplication.startDragDistance():
-                    return False
-                self._dragging = True
-                self.header.setCursor(Qt.CursorShape.ClosedHandCursor)
-                self.headerDragged.emit(self, gpos, "start")
-            self.headerDragged.emit(self, gpos, "move")
-            return True
-        if t == QEvent.Type.MouseButtonRelease:
-            was = self._dragging
-            self._drag_start = None
-            self._dragging = False
-            self._set_grabbed(False)
-            if was:
-                self.header.setCursor(Qt.CursorShape.OpenHandCursor)
-                self.headerDragged.emit(self, gpos, "drop")
-                return True
-        return False
-
-    def _show_tools(self, on):
-        """Fades the header's Move / Files / Background buttons in or out."""
-        for effect in self._tool_effects:
-            anim = QPropertyAnimation(effect, b"opacity", effect)
-            anim.setDuration(120)
-            anim.setEndValue(1.0 if on else 0.0)
-            anim.start(QPropertyAnimation.DeletionPolicy.DeleteWhenStopped)
 
     # ----- appearance -----------------------------------------------------
 
@@ -652,10 +548,7 @@ class TerminalPanel(QWidget):
         self.status_label.setText(text)
         # "connected" is the green dot; other states are spelled out.
         self.status_label.setVisible(state != "ok")
-        self.status_dot.setToolTip(text)
-        self.status_dot.setProperty("state", state)
-        self.status_dot.style().unpolish(self.status_dot)
-        self.status_dot.style().polish(self.status_dot)
+        self._set_dot(text, state)
 
     # ----- clipboard ------------------------------------------------------
 
@@ -669,6 +562,13 @@ class TerminalPanel(QWidget):
             return
         self.font_size = size
         self.terminal.setTerminalFont(terminal_font(size))
+
+    def after_reparent(self):
+        # A new window polishes the widgets again with the style sheet, which
+        # resets the terminal's font to the default size: set this terminal's
+        # (zoomed) font again. Colours and the process are not affected.
+        if abs(self.display.font().pointSizeF() - self.font_size) > 0.01:
+            self.terminal.setTerminalFont(terminal_font(self.font_size))
 
     def paste(self):
         self.terminal.pasteClipboard()
@@ -716,38 +616,47 @@ class TerminalPanel(QWidget):
         menu = QMenu(self)
         copy = QAction("Copy", menu)
         copy.setShortcut(QKeySequence("Ctrl+Shift+C"))
-        copy.setEnabled(bool(self.terminal.selectedText()))
+        selected = bool(self.terminal.selectedText())
+        copy.setEnabled(selected)
         copy.triggered.connect(self.copy)
         paste = QAction("Paste", menu)
         paste.setShortcut(QKeySequence("Ctrl+Shift+V"))
         paste.triggered.connect(self.paste)
         menu.addAction(copy)
+        if not selected:
+            # Programs that use the mouse (Claude Code, vim, htop, tmux…)
+            # select by themselves; the terminal does not see that selection.
+            tip = QLabel("Nothing selected in the terminal. Where a program uses\n"
+                         "the mouse (Claude Code, vim, htop…), it copies its own\n"
+                         "selection; hold Shift while dragging to select here.")
+            tip.setObjectName("menuHint")
+            hint = QWidgetAction(menu)
+            hint.setDefaultWidget(tip)
+            hint.setEnabled(False)
+            menu.addAction(hint)
         menu.addAction(paste)
         menu.addSeparator()
         files = QAction("Files for this connection", menu)
         files.setShortcut(QKeySequence("Ctrl+Shift+F"))
         files.triggered.connect(lambda: self.scpRequested.emit(self))
         menu.addAction(files)
+        menu.addAction(self.detach_btn.icon(), self.detach_btn.text()).triggered.connect(
+            self._detach_clicked)
         if self.ended:
             menu.addSeparator()
             menu.addAction(self.reconnect_btn.icon(), self.reconnect_btn.text()).triggered \
                 .connect(lambda: self.reconnectRequested.emit(self))
+        if not self.profile.is_local and self.has_docker():
+            menu.addSeparator()
+            menu.addAction(icons.icon("docker"), "Docker…").triggered.connect(
+                lambda: self.dockerRequested.emit(self))
         if not self.profile.is_local:
             menu.addSeparator()
+            menu.addAction(icons.icon("shield"), "Firewall…").triggered.connect(
+                lambda: self.firewallRequested.emit(self))
             menu.addAction("Set up key login…").triggered.connect(
                 lambda: self.keySetupRequested.emit(self))
         menu.exec(self.terminal.mapToGlobal(pos))
-
-    def set_active(self, active):
-        self.setProperty("active", bool(active))
-        self.style().unpolish(self)
-        self.style().polish(self)
-        self._update_active_line()
-
-    def _update_active_line(self):
-        """A thin line over the active terminal's header, in its colour."""
-        color = theme.accent_for(self.appearance) if self.property("active") else "transparent"
-        self.header.setStyleSheet(f"#termHeader {{ border-top: 2px solid {color}; }}")
 
     def focus_terminal(self):
         getattr(self, "display", self.terminal).setFocus()

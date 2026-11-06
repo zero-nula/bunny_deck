@@ -81,12 +81,12 @@ def test(app):
     check(not w2.status_label.isVisible() and w2.status_dot.property("state") == "ok",
           "connected shows only the green dot")
     effects = [b.graphicsEffect().opacity() for b in w2.tools]
-    check(effects == [0.0, 0.0], "Move / Background hidden at first")
+    check(effects == [0.0, 0.0, 0.0], "Move / Background / Detach hidden at first")
     check(not hasattr(w2, "scp_btn"), "Files is in the toolbar, not in the header")
     check(w2.close_btn.graphicsEffect() is None, "close is always shown")
     QApplication.sendEvent(w2.header, QEvent(QEvent.Type.Enter))
     yield 0.4
-    check([b.graphicsEffect().opacity() for b in w2.tools] == [1.0, 1.0],
+    check([b.graphicsEffect().opacity() for b in w2.tools] == [1.0, 1.0, 1.0],
           "they fade in when the mouse is over the header")
     QApplication.sendEvent(w2.header, QEvent(QEvent.Type.Leave))
     yield 0.4

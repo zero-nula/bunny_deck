@@ -134,6 +134,12 @@ QMenu#aiMenu {
     border-radius: 8px;
 }
 
+QLabel#menuHint {
+    color: #7d8590;
+    font-size: 11px;
+    padding: 0px 12px 6px 12px;
+}
+
 QLabel#menuHeader {
     color: #6b7280;
     font-size: 10px;
@@ -742,6 +748,13 @@ QToolButton#copyBtn {
     max-height: 36px;
 }
 
+QLabel#copyCaption {
+    color: #aab1bd;
+    font-size: 10px;
+    font-weight: bold;
+    letter-spacing: 1px;
+}
+
 QToolButton#copyBtn:hover {
     background-color: #3a6cd0;
 }
@@ -964,4 +977,130 @@ QListWidget::item:selected {
     color: #aab1bd;
     font-family: monospace;
     font-size: 11px;
+}
+
+/* Docker panel (dockerpanel.py) */
+QLabel#dockerMessage {
+    color: #8a919c;
+    padding: 24px;
+    background-color: #0e1013;
+}
+
+QTreeWidget#dockerTree {
+    background-color: #0e1013;
+    border: none;
+    color: #c9ced6;
+    font-size: 12px;
+    outline: none;
+}
+
+QTreeWidget#dockerTree::item {
+    padding: 3px 2px;
+}
+
+QTreeWidget#dockerTree::item:selected {
+    background-color: #1a2436;
+    color: #ffffff;
+}
+
+QTreeWidget#dockerTree::item:hover:!selected {
+    background-color: #15181e;
+}
+
+QTreeWidget#dockerTree QHeaderView::section {
+    background-color: #121418;
+    color: #6b7280;
+    border: none;
+    border-bottom: 1px solid #1f232a;
+    padding: 4px 6px;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+/* Firewall window (firewalldialog.py) */
+QLabel#fwBanner {
+    border-radius: 8px;
+    padding: 8px 10px;
+    border: 1px solid #262b33;
+    background-color: #15181e;
+    color: #c9ced6;
+}
+
+QLabel#fwBanner[level="ok"] {
+    border-color: rgba(108, 192, 112, 0.5);
+    background-color: rgba(108, 192, 112, 0.10);
+    color: #9bd89e;
+}
+
+QLabel#fwBanner[level="warn"] {
+    border-color: rgba(224, 164, 58, 0.55);
+    background-color: rgba(224, 164, 58, 0.10);
+    color: #f0c27a;
+}
+
+QLabel#fwBanner[level="bad"] {
+    border-color: #5c2b2b;
+    background-color: #2a1416;
+    color: #f0a0a0;
+}
+
+QLabel#fwWarning {
+    color: #f0a0a0;
+    background-color: #2a1416;
+    border: 1px solid #5c2b2b;
+    border-radius: 6px;
+    padding: 6px 8px;
+}
+
+QLabel#fwPreview {
+    font-family: monospace;
+    color: #c9ced6;
+    background-color: #0a0b0d;
+    border: 1px solid #1f232a;
+    border-radius: 6px;
+    padding: 8px 10px;
+}
+
+QTreeWidget#fwRules {
+    background-color: #0e1013;
+    border: 1px solid #1f232a;
+    border-radius: 6px;
+    font-size: 12px;
+}
+
+QTreeWidget#fwRules::item {
+    padding: 3px 2px;
+}
+
+QTreeWidget#fwRules::item:selected {
+    background-color: #1a2436;
+    color: #ffffff;
+}
+
+/* Radio buttons, in the style of the check boxes */
+QRadioButton {
+    spacing: 8px;
+}
+
+QRadioButton::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #3a404b;
+    border-radius: 8px;
+    background-color: #0e1013;
+}
+
+QRadioButton::indicator:hover {
+    border-color: #5b8def;
+}
+
+QRadioButton::indicator:checked {
+    border: 4px solid #5b8def;
+    background-color: #ffffff;
+    width: 8px;
+    height: 8px;
+}
+
+QRadioButton::indicator:disabled {
+    border-color: #262b33;
 }
